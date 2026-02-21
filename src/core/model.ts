@@ -1,4 +1,4 @@
-// ── Types ───────────────────────────────────────────────────
+// ── Core Event Types ─────────────────────────────────────────
 
 export type EventType =
   | 'channel.create'
@@ -18,15 +18,15 @@ export type EventType =
 // ─────────────────────────────────────────────
 
 export interface Identity {
-  publicKey: any;       
-  privateKey?: any; 
+  publicKey: any;
+  privateKey?: any;
   username: string;
   avatar: string | null;
   createdAt: number;
 }
 
 export interface LocalIdentity extends Identity {
-  privateKey?: any; 
+  privateKey?: any;
 }
 
 // ─────────────────────────────────────────────
@@ -34,13 +34,13 @@ export interface LocalIdentity extends Identity {
 // ─────────────────────────────────────────────
 
 export interface Channel {
-  id: string;               
+  id: string;
   creator: string;
   createdAt: number;
 }
 
 // ─────────────────────────────────────────────
-// Contacts (substitui Friend)
+// Contacts
 // ─────────────────────────────────────────────
 
 export interface Contact {
@@ -52,7 +52,6 @@ export interface Contact {
 // ─────────────────────────────────────────────
 // Events
 // ─────────────────────────────────────────────
-
 
 export interface Event<T = any> {
   id: string;               // hash determinístico
@@ -69,8 +68,6 @@ export interface Event<T = any> {
 // Payloads
 // ─────────────────────────────────────────────
 
-// Channel
-
 export interface ChannelCreatePayload {
   name: string;
   description?: string;
@@ -81,17 +78,13 @@ export interface ChannelUpdatePayload {
   description?: string;
 }
 
-// Members
-
 export interface MemberJoinPayload {
-  member: string;           // publicKey
+  member: string;
 }
 
 export interface MemberLeavePayload {
   member: string;
 }
-
-// Roles
 
 export interface RoleGrantPayload {
   member: string;
@@ -102,8 +95,6 @@ export interface RoleRevokePayload {
   member: string;
   role: string;
 }
-
-// Messages
 
 export interface MessageCreatePayload {
   content: string;
@@ -118,20 +109,18 @@ export interface MessageDeletePayload {
   targetEventId: string;
 }
 
-// Profile
-
 export interface ProfileUpdatePayload {
   username?: string;
   avatar?: string;
 }
 
 // ─────────────────────────────────────────────
-// Derived Models (UI Layer)
+// Derived Models (State from DAG)
 // ─────────────────────────────────────────────
 
 export interface DerivedMessage {
   id: string;
-  author: string;
+  author: string;           // publicKey
   content: string;
   timestamp: number;
   edited: boolean;
@@ -142,4 +131,53 @@ export interface DerivedChannelState {
   channel: Channel;
   members: Map<string, string[]>;
   messages: DerivedMessage[];
+}
+
+// ─────────────────────────────────────────────
+// UI Layer Types
+// ─────────────────────────────────────────────
+
+export interface UIProfile {
+  publicKey: string;
+  username: string;
+  avatar: string;           // initials or URL
+}
+
+export interface UIChannel {
+  id: string;
+  name: string;
+  description: string;
+  memberCount: number;
+  lastMessage?: string;
+}
+
+export interface UIMessage {
+  id: string;
+  author: string;           // display name
+  authorKey: string;        // publicKey
+  own: boolean;
+  content: string;
+  time: string;
+  edited: boolean;
+  deleted: boolean;
+}
+
+export interface UIAppState {
+  profile: UIProfile | null;
+  channels: UIChannel[];
+  activeChannelId: string | null;
+  messages: UIMessage[];
+}
+
+// ─────────────────────────────────────────────
+// IPC API (exposed via preload bridge)
+// ─────────────────────────────────────────────
+
+export interface ZipAPI {
+  getIdentity(): Promise<UIProfile | null>;
+  createIdentity(username: string): Promise<UIProfile>;
+  listChannels(): Promise<UIChannel[]>;
+  createChannel(name: string, description?: string): Promise<UIChannel>;
+  listMessages(channelId: string): Promise<UIMessage[]>;
+  sendMessage(channelId: string, content: string): Promise<void>;
 }

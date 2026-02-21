@@ -1,22 +1,15 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-// ── State ───────────────────────────────────────────────────
+// ── Type Declarations (mirrored from model.ts for browser context) ─────────
+// Access the bridge through a typed accessor to avoid
+// TypeScript's strict Window augmentation requirement
+const zipApi = () => window.zip;
 const state = {
-    view: 'home',
-    active: {
-        type: null,
-        id: null
-    },
-    profile: {
-        name: 'Luiz Fernando',
-        handle: '@luizf',
-        status: 'Online',
-        avatar: 'LF'
-    },
-    groups: [],
-    friends: []
+    profile: null,
+    channels: [],
+    activeChannelId: null,
+    messages: [],
 };
-// ── UI Helpers ──────────────────────────────────────────────
+// ── UI Helpers ───────────────────────────────────────────────
 function getEl(id) {
     const el = document.getElementById(id);
     if (!el)
@@ -25,69 +18,71 @@ function getEl(id) {
 }
 const ui = {
     homeButton: getEl('home-button'),
-    friendsButton: getEl('friends-button'),
-    openCreateGroup: getEl('open-create-group'),
-    createGroupInline: getEl('create-group-inline'),
-    groupList: getEl('group-list'),
-    friendList: getEl('friend-list'),
-    groupCount: getEl('group-count'),
-    friendCount: getEl('friend-count'),
+    openCreateChannel: getEl('open-create-channel'),
+    createChannelInline: getEl('create-channel-inline'),
+    channelList: getEl('channel-list'),
+    channelCount: getEl('channel-count'),
     chatContext: getEl('chat-context'),
     chatTitle: getEl('chat-title'),
     chatSubtitle: getEl('chat-subtitle'),
     messageList: getEl('message-list'),
     messageForm: getEl('message-form'),
     messageInput: getEl('message-input'),
+    sendButton: getEl('message-form') // resolved via form submit
+        .querySelector('.send-button'),
     participantList: getEl('participant-list'),
     participantCount: getEl('participant-count'),
     participantsTitle: getEl('participants-title'),
-    createGroupDialog: getEl('create-group-dialog'),
-    createGroupForm: getEl('create-group-form'),
-    cancelCreateGroup: getEl('cancel-create-group'),
-    groupName: getEl('group-name'),
-    groupDescription: getEl('group-description'),
     profileAvatar: getEl('profile-avatar'),
     profileName: getEl('profile-name'),
     profileHandle: getEl('profile-handle'),
-    profileStatus: getEl('profile-status')
+    profileStatus: getEl('profile-status'),
+    railProfileAvatar: getEl('profile-trigger'),
+    // Onboarding
+    onboardingDialog: getEl('onboarding-dialog'),
+    onboardingForm: getEl('onboarding-form'),
+    onboardingUsername: getEl('onboarding-username'),
+    // Create channel
+    createChannelDialog: getEl('create-channel-dialog'),
+    createChannelForm: getEl('create-channel-form'),
+    cancelCreateChannel: getEl('cancel-create-channel'),
+    channelName: getEl('channel-name'),
+    channelDescription: getEl('channel-description'),
 };
-// ── Utilities ───────────────────────────────────────────────
-function getStatusClass(status) {
-    if (status === 'offline')
-        return 'offline';
-    if (status === 'busy')
-        return 'busy';
-    return '';
+// ── Render Functions ─────────────────────────────────────────
+function renderProfile() {
+    if (!state.profile)
+        return;
+    const { username, avatar } = state.profile;
+    const handle = '@' + username.toLowerCase().replace(/\s+/g, '');
+    ui.profileAvatar.textContent = avatar;
+    ui.profileName.textContent = username;
+    ui.profileHandle.textContent = handle;
+    ui.railProfileAvatar.textContent = avatar;
 }
-function activeConversation() {
-    if (state.active.type === 'group') {
-        return state.groups.find((g) => g.id === state.active.id);
+function renderChannels() {
+    ui.channelCount.textContent = String(state.channels.length);
+    if (state.channels.length === 0) {
+        ui.channelList.innerHTML = `
+      <li class="empty-list-hint">
+        Nenhum canal ainda.<br>Crie um para começar.
+      </li>
+    `;
+        return;
     }
-    if (state.active.type === 'friend') {
-        return state.friends.find((f) => f.id === state.active.id);
-    }
-    return undefined;
-}
-function nowTime() {
-    return new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-}
-// ── Render Functions ────────────────────────────────────────
-function renderRail() {
-    ui.homeButton.classList.toggle('active', state.view === 'home');
-    ui.friendsButton.classList.toggle('active', state.view === 'friends');
-}
-function renderGroups() {
-    ui.groupCount.textContent = String(state.groups.length);
-    ui.groupList.innerHTML = state.groups
-        .map((group) => {
-        const isActive = state.active.type === 'group' && state.active.id === group.id;
+    ui.channelList.innerHTML = state.channels
+        .map((ch) => {
+        const isActive = ch.id === state.activeChannelId;
+        const preview = ch.lastMessage
+            ? ch.lastMessage.slice(0, 40) + (ch.lastMessage.length > 40 ? '…' : '')
+            : 'Sem mensagens';
         return `
         <li>
-          <button class="entity-item ${isActive ? 'active' : ''}" type="button" data-group-id="${group.id}">
-            <span class="avatar">${group.name.slice(0, 2).toUpperCase()}</span>
+          <button class="entity-item ${isActive ? 'active' : ''}" type="button" data-channel-id="${ch.id}">
+            <span class="avatar">#</span>
             <span class="entity-meta">
-              <span class="entity-name">#${group.name}</span>
-              <span class="entity-subtitle">${group.description}</span>
+              <span class="entity-name">${escapeHtml(ch.name)}</span>
+              <span class="entity-subtitle">${escapeHtml(preview)}</span>
             </span>
             <span class="entity-status"></span>
           </button>
@@ -96,238 +91,226 @@ function renderGroups() {
     })
         .join('');
 }
-function renderFriends() {
-    ui.friendCount.textContent = String(state.friends.length);
-    ui.friendList.innerHTML = state.friends
-        .map((friend) => {
-        const isActive = state.active.type === 'friend' && state.active.id === friend.id;
-        const statusClass = getStatusClass(friend.status);
-        return `
-        <li>
-          <button class="entity-item ${isActive ? 'active' : ''}" type="button" data-friend-id="${friend.id}">
-            <span class="avatar">${friend.avatar}</span>
-            <span class="entity-meta">
-              <span class="entity-name">${friend.name}</span>
-              <span class="entity-subtitle">${friend.lastMessage}</span>
-            </span>
-            <span class="entity-status ${statusClass}"></span>
-          </button>
-        </li>
-      `;
-    })
-        .join('');
-}
 function renderChat() {
-    const conversation = activeConversation();
-    if (!conversation) {
-        ui.chatContext.textContent = '';
+    const channel = state.channels.find((c) => c.id === state.activeChannelId);
+    if (!channel) {
         ui.chatTitle.textContent = 'Zip Chat';
-        ui.chatSubtitle.textContent = '';
+        ui.chatSubtitle.textContent = 'Selecione um canal para começar';
+        ui.chatContext.textContent = '';
         ui.messageList.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">
-          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
           </svg>
         </div>
-        <p class="empty-title">Nenhuma conversa selecionada</p>
-        <p class="empty-sub">Selecione um grupo ou amigo para começar a conversar.</p>
+        <p class="empty-title">Nenhum canal selecionado</p>
+        <p class="empty-sub">Selecione um canal ou crie um novo para começar a conversar.</p>
+      </div>
+    `;
+        setInputEnabled(false);
+        return;
+    }
+    ui.chatContext.textContent = 'canal';
+    ui.chatTitle.textContent = `#${channel.name}`;
+    ui.chatSubtitle.textContent = channel.description || `${channel.memberCount} membro(s)`;
+    setInputEnabled(true);
+    if (state.messages.length === 0) {
+        ui.messageList.innerHTML = `
+      <div class="empty-state">
+        <p class="empty-title">Nenhuma mensagem ainda</p>
+        <p class="empty-sub">Seja o primeiro a escrever algo em #${escapeHtml(channel.name)}.</p>
       </div>
     `;
         return;
     }
-    if (state.active.type === 'group') {
-        const group = conversation;
-        ui.chatContext.textContent = 'grupo';
-        ui.chatTitle.textContent = `#${group.name}`;
-        ui.chatSubtitle.textContent = group.description;
-        ui.participantsTitle.textContent = 'Pessoas do grupo';
-    }
-    else {
-        const friend = conversation;
-        ui.chatContext.textContent = 'amigo';
-        ui.chatTitle.textContent = friend.name;
-        ui.chatSubtitle.textContent = 'Conversa direta';
-        ui.participantsTitle.textContent = 'Pessoas na conversa';
-    }
-    ui.messageList.innerHTML = conversation.messages
-        .map((message) => `
-      <article class="message ${message.own ? 'own' : ''}">
+    ui.messageList.innerHTML = state.messages
+        .filter((m) => !m.deleted)
+        .map((m) => `
+      <article class="message ${m.own ? 'own' : ''}">
         <header class="message-head">
-          <span class="avatar">${message.avatar}</span>
-          <span class="message-author">${message.author}</span>
-          <span class="message-time">${message.time}</span>
+          <span class="avatar">${m.author.slice(0, 2).toUpperCase()}</span>
+          <span class="message-author">${escapeHtml(m.author)}${m.edited ? ' <em class="edited-tag">(editado)</em>' : ''}</span>
+          <span class="message-time">${m.time}</span>
         </header>
-        <div class="message-bubble">${message.text}</div>
+        <div class="message-bubble">${escapeHtml(m.content)}</div>
       </article>
     `)
         .join('');
     ui.messageList.scrollTop = ui.messageList.scrollHeight;
 }
 function renderParticipants() {
-    if (!state.active.type) {
+    const channel = state.channels.find((c) => c.id === state.activeChannelId);
+    if (!channel) {
         ui.participantCount.textContent = '0';
         ui.participantList.innerHTML = '';
         return;
     }
-    if (state.active.type === 'group') {
-        const group = activeConversation();
-        if (!group)
-            return;
-        ui.participantCount.textContent = String(group.participants.length);
-        ui.participantList.innerHTML = group.participants
-            .map((p) => `
-        <li class="participant-item">
-          <span class="avatar">${p.avatar}</span>
-          <span>
-            <span class="entity-name">${p.name}</span>
-            <span class="participant-role">${p.role}</span>
-          </span>
-          <span class="entity-status ${getStatusClass(p.status)}"></span>
-        </li>
-      `)
-            .join('');
-        return;
-    }
-    const friend = activeConversation();
-    if (!friend)
-        return;
-    const directParticipants = [
-        { name: state.profile.name, role: 'voce', status: 'online', avatar: state.profile.avatar },
-        { name: friend.name, role: 'amigo', status: friend.status, avatar: friend.avatar }
-    ];
-    ui.participantCount.textContent = String(directParticipants.length);
-    ui.participantList.innerHTML = directParticipants
-        .map((p) => `
-      <li class="participant-item">
-        <span class="avatar">${p.avatar}</span>
-        <span>
-          <span class="entity-name">${p.name}</span>
-          <span class="participant-role">${p.role}</span>
-        </span>
-        <span class="entity-status ${getStatusClass(p.status)}"></span>
-      </li>
-    `)
-        .join('');
-}
-function renderProfile() {
-    ui.profileAvatar.textContent = state.profile.avatar;
-    ui.profileName.textContent = state.profile.name;
-    ui.profileHandle.textContent = state.profile.handle;
-    ui.profileStatus.textContent = state.profile.status;
+    ui.participantsTitle.textContent = 'Membros do canal';
+    ui.participantCount.textContent = String(channel.memberCount);
+    // We don't have full member list from message listing,
+    // so show a summary row with member count
+    const myProfile = state.profile;
+    ui.participantList.innerHTML = myProfile
+        ? `
+    <li class="participant-item">
+      <span class="avatar">${escapeHtml(myProfile.avatar)}</span>
+      <span>
+        <span class="entity-name">${escapeHtml(myProfile.username)}</span>
+        <span class="participant-role">você</span>
+      </span>
+      <span class="entity-status"></span>
+    </li>
+  `
+        : '';
 }
 function render() {
-    renderRail();
-    renderGroups();
-    renderFriends();
+    renderProfile();
+    renderChannels();
     renderChat();
     renderParticipants();
-    renderProfile();
 }
-// ── Actions ─────────────────────────────────────────────────
-function activateGroup(groupId) {
-    state.view = 'home';
-    state.active.type = 'group';
-    state.active.id = groupId;
-    render();
+// ── Utilities ────────────────────────────────────────────────
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
-function activateFriend(friendId) {
-    state.view = 'friends';
-    state.active.type = 'friend';
-    state.active.id = friendId;
-    render();
+function setInputEnabled(enabled) {
+    ui.messageInput.disabled = !enabled;
+    ui.messageInput.placeholder = enabled
+        ? 'Escreva uma mensagem…'
+        : 'Selecione um canal para enviar mensagens…';
+    const sendBtn = ui.messageForm.querySelector('.send-button');
+    if (sendBtn)
+        sendBtn.disabled = !enabled;
 }
-function openCreateGroupDialog() {
-    if (typeof ui.createGroupDialog.showModal === 'function') {
-        ui.createGroupDialog.showModal();
-    }
-}
-function closeCreateGroupDialog() {
-    if (ui.createGroupDialog.open) {
-        ui.createGroupDialog.close();
-    }
-}
-// ── Event Listeners ─────────────────────────────────────────
-ui.homeButton.addEventListener('click', () => {
-    if (state.groups.length > 0) {
-        activateGroup(state.groups[0].id);
-    }
-});
-ui.friendsButton.addEventListener('click', () => {
-    if (state.friends.length > 0) {
-        activateFriend(state.friends[0].id);
-    }
-});
-ui.groupList.addEventListener('click', (event) => {
-    const button = event.target.closest('button[data-group-id]');
-    if (!button?.dataset.groupId)
-        return;
-    activateGroup(button.dataset.groupId);
-});
-ui.friendList.addEventListener('click', (event) => {
-    const button = event.target.closest('button[data-friend-id]');
-    if (!button?.dataset.friendId)
-        return;
-    activateFriend(button.dataset.friendId);
-});
-ui.openCreateGroup.addEventListener('click', openCreateGroupDialog);
-ui.createGroupInline.addEventListener('click', openCreateGroupDialog);
-ui.cancelCreateGroup.addEventListener('click', closeCreateGroupDialog);
-ui.createGroupForm.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const name = ui.groupName.value.trim().toLowerCase();
-    const description = ui.groupDescription.value.trim();
-    if (!name || !description)
-        return;
-    const newGroupId = `grp-${Date.now()}`;
-    const newGroup = {
-        id: newGroupId,
-        name,
-        description,
-        participants: [
-            { name: state.profile.name, role: 'admin', status: 'online', avatar: state.profile.avatar },
-            { name: 'Novo membro', role: 'convidado', status: 'offline', avatar: 'NM' }
-        ],
-        messages: [
-            {
-                id: `m-${Date.now()}`,
-                author: state.profile.name,
-                avatar: state.profile.avatar,
-                own: true,
-                text: `Grupo ${name} criado com sucesso.`,
-                time: nowTime()
-            }
-        ]
-    };
-    state.groups.unshift(newGroup);
-    ui.createGroupForm.reset();
-    closeCreateGroupDialog();
-    activateGroup(newGroupId);
-});
-ui.messageForm.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const value = ui.messageInput.value.trim();
-    if (!value)
-        return;
-    const conversation = activeConversation();
-    if (!conversation)
-        return;
-    const newMessage = {
-        id: `msg-${Date.now()}`,
-        author: state.profile.name,
-        avatar: state.profile.avatar,
-        own: true,
-        text: value,
-        time: nowTime()
-    };
-    conversation.messages.push(newMessage);
-    ui.messageInput.value = '';
+// ── Actions ──────────────────────────────────────────────────
+async function activateChannel(channelId) {
+    state.activeChannelId = channelId;
+    renderChannels();
     renderChat();
+    renderParticipants();
+    try {
+        state.messages = await zipApi().listMessages(channelId);
+        renderChat();
+    }
+    catch (err) {
+        console.error('Failed to load messages:', err);
+    }
+}
+function openCreateChannelDialog() {
+    if (typeof ui.createChannelDialog.showModal === 'function') {
+        ui.createChannelDialog.showModal();
+    }
+}
+function closeCreateChannelDialog() {
+    if (ui.createChannelDialog.open) {
+        ui.createChannelDialog.close();
+    }
+}
+// ── Event Listeners ──────────────────────────────────────────
+ui.openCreateChannel.addEventListener('click', openCreateChannelDialog);
+ui.createChannelInline.addEventListener('click', openCreateChannelDialog);
+ui.cancelCreateChannel.addEventListener('click', closeCreateChannelDialog);
+ui.channelList.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-channel-id]');
+    if (!button?.dataset.channelId)
+        return;
+    activateChannel(button.dataset.channelId);
+});
+ui.homeButton.addEventListener('click', () => {
+    if (state.channels.length > 0 && !state.activeChannelId) {
+        activateChannel(state.channels[0].id);
+    }
+});
+ui.createChannelForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = ui.channelName.value.trim().toLowerCase().replace(/\s+/g, '-');
+    const description = ui.channelDescription.value.trim();
+    if (!name)
+        return;
+    try {
+        const newChannel = await zipApi().createChannel(name, description);
+        state.channels.unshift(newChannel);
+        ui.createChannelForm.reset();
+        closeCreateChannelDialog();
+        await activateChannel(newChannel.id);
+    }
+    catch (err) {
+        console.error('Failed to create channel:', err);
+    }
+});
+ui.messageForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const content = ui.messageInput.value.trim();
+    if (!content || !state.activeChannelId)
+        return;
+    ui.messageInput.value = '';
+    ui.messageInput.disabled = true;
+    try {
+        await zipApi().sendMessage(state.activeChannelId, content);
+        // Reload messages to display the sent one
+        state.messages = await zipApi().listMessages(state.activeChannelId);
+        // Update last message preview in channel list
+        const ch = state.channels.find((c) => c.id === state.activeChannelId);
+        if (ch)
+            ch.lastMessage = content;
+        renderChannels();
+        renderChat();
+    }
+    catch (err) {
+        console.error('Failed to send message:', err);
+    }
+    finally {
+        ui.messageInput.disabled = false;
+        ui.messageInput.focus();
+    }
 });
 document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-        closeCreateGroupDialog();
+    if (event.key === 'Escape')
+        closeCreateChannelDialog();
+});
+// ── Onboarding ───────────────────────────────────────────────
+ui.onboardingForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const username = ui.onboardingUsername.value.trim();
+    if (!username)
+        return;
+    try {
+        state.profile = await zipApi().createIdentity(username);
+        ui.onboardingDialog.close();
+        render();
+    }
+    catch (err) {
+        console.error('Failed to create identity:', err);
     }
 });
-// ── Init ────────────────────────────────────────────────────
-render();
+// ── Init ─────────────────────────────────────────────────────
+async function init() {
+    try {
+        // Load identity
+        state.profile = await zipApi().getIdentity();
+        if (!state.profile) {
+            // First run — show onboarding
+            if (typeof ui.onboardingDialog.showModal === 'function') {
+                ui.onboardingDialog.showModal();
+            }
+            return;
+        }
+        // Load channels
+        state.channels = await zipApi().listChannels();
+        render();
+        // Auto-open first channel
+        if (state.channels.length > 0) {
+            await activateChannel(state.channels[0].id);
+        }
+    }
+    catch (err) {
+        console.error('Init failed:', err);
+    }
+}
+init();

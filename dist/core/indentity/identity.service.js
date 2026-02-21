@@ -9,7 +9,7 @@ class IdentityService {
     async loadLocalIdentity() {
         const identity = this.repository.getLocalIdentity();
         if (identity === undefined) {
-            return "No local identity found";
+            return undefined;
         }
         return identity;
     }

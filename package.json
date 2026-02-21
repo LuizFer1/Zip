@@ -10,12 +10,14 @@
     "dev": "tsc --watch"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.0",
     "electron": "^30.0.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@noble/curves": "^2.0.1",
+    "@noble/curves": "1.8.2",
+    "@prisma/adapter-better-sqlite3": "^7.4.1",
     "@prisma/client": "^7.4.1",
     "better-sqlite3": "^12.6.2",
     "prisma": "^7.4.1"

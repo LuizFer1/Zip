@@ -895,6 +895,56 @@ button, input, textarea {
   max-width: 280px;
 }
 
+/* ── Empty List Hint ─────────────────────────────────────── */
+.empty-list-hint {
+  padding: 10px 6px;
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  line-height: 1.5;
+  text-align: center;
+  user-select: none;
+}
+
+/* ── Edited Tag ───────────────────────────────────────────── */
+.edited-tag {
+  font-style: italic;
+  font-size: 0.72em;
+  color: var(--text-faint);
+  margin-left: 4px;
+}
+
+/* ── Onboarding Dialog ────────────────────────────────────── */
+#onboarding-dialog {
+  border: 1px solid rgba(124, 111, 255, 0.4);
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(11, 9, 30, 0.99), rgba(16, 13, 40, 0.99));
+  color: var(--text-main);
+  width: min(420px, 92vw);
+  box-shadow: var(--shadow-lg), 0 0 60px rgba(124, 111, 255, 0.18);
+  padding: 0;
+}
+
+#onboarding-dialog::backdrop {
+  background: rgba(3, 2, 14, 0.84);
+  backdrop-filter: blur(8px);
+}
+
+/* ── Create Channel Dialog ────────────────────────────────── */
+#create-channel-dialog {
+  border: 1px solid rgba(124, 111, 255, 0.4);
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(11, 9, 30, 0.99), rgba(16, 13, 40, 0.99));
+  color: var(--text-main);
+  width: min(460px, 92vw);
+  box-shadow: var(--shadow-lg), 0 0 60px rgba(124, 111, 255, 0.18);
+  padding: 0;
+}
+
+#create-channel-dialog::backdrop {
+  background: rgba(3, 2, 14, 0.74);
+  backdrop-filter: blur(6px);
+}
+
 /* ── Keyframes ────────────────────────────────────────────── */
 @keyframes rise-in {
   from { opacity: 0; transform: translateX(-8px); }

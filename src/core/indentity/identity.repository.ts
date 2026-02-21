@@ -1,25 +1,27 @@
 import { Identity } from "../model";
 import { prisma } from "../storage/prisma.client";
+
 export class IdentityRepository {
   async getLocalIdentity(): Promise<Identity | undefined> {
-    let data = await prisma.localIdentity.findFirst();
+    const data = await prisma.localIdentity.findFirst();
     if (data) {
-      let identity: Identity = {
+      const identity: Identity = {
         publicKey: data.publicKey,
         privateKey: data.privateKey,
         username: data.username,
-        avatar: data.avatar,
+        avatar: data.avatar ?? null,
         createdAt: data.createdAt,
       };
       return identity;
     }
     return undefined;
   }
+
   private toDomain(data: any): Identity {
     return {
       publicKey: data.publicKey,
-      username: data.username ?? undefined,
-      avatar: data.avatar ?? undefined,
+      username: data.username ?? '',
+      avatar: data.avatar ?? null,
       createdAt: data.updatedAt,
     };
   }
@@ -47,7 +49,7 @@ export class IdentityRepository {
       publicKey: data.publicKey,
       privateKey: data.privateKey,
       username: data.username,
-      avatar: data.avatar ?? undefined,
+      avatar: data.avatar ?? null,
       createdAt: data.createdAt,
     };
   }
@@ -61,15 +63,14 @@ export class IdentityRepository {
 
     return {
       publicKey: data.publicKey,
-      username: data.username ?? undefined,
-      avatar: data.avatar ?? undefined,
+      username: data.username ?? '',
+      avatar: data.avatar ?? null,
       createdAt: data.updatedAt,
     };
   }
 
   async getAllIdentities(): Promise<Identity[]> {
     const data = await prisma.identity.findMany();
-
-    return data.map(this.toDomain);
+    return data.map((d) => this.toDomain(d));
   }
 }

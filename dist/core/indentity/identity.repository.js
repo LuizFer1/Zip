@@ -4,13 +4,13 @@ exports.IdentityRepository = void 0;
 const prisma_client_1 = require("../storage/prisma.client");
 class IdentityRepository {
     async getLocalIdentity() {
-        let data = await prisma_client_1.prisma.localIdentity.findFirst();
+        const data = await prisma_client_1.prisma.localIdentity.findFirst();
         if (data) {
-            let identity = {
+            const identity = {
                 publicKey: data.publicKey,
                 privateKey: data.privateKey,
                 username: data.username,
-                avatar: data.avatar,
+                avatar: data.avatar ?? null,
                 createdAt: data.createdAt,
             };
             return identity;
@@ -20,8 +20,8 @@ class IdentityRepository {
     toDomain(data) {
         return {
             publicKey: data.publicKey,
-            username: data.username ?? undefined,
-            avatar: data.avatar ?? undefined,
+            username: data.username ?? '',
+            avatar: data.avatar ?? null,
             createdAt: data.updatedAt,
         };
     }
@@ -44,12 +44,11 @@ class IdentityRepository {
                 createdAt: identity.createdAt,
             },
         });
-        // 🔥 converte NULL → UNDEFINED AQUI (infra resolve isso)
         return {
             publicKey: data.publicKey,
             privateKey: data.privateKey,
             username: data.username,
-            avatar: data.avatar ?? undefined,
+            avatar: data.avatar ?? null,
             createdAt: data.createdAt,
         };
     }
@@ -61,14 +60,14 @@ class IdentityRepository {
             return null;
         return {
             publicKey: data.publicKey,
-            username: data.username ?? undefined,
-            avatar: data.avatar ?? undefined,
+            username: data.username ?? '',
+            avatar: data.avatar ?? null,
             createdAt: data.updatedAt,
         };
     }
     async getAllIdentities() {
         const data = await prisma_client_1.prisma.identity.findMany();
-        return data.map(this.toDomain);
+        return data.map((d) => this.toDomain(d));
     }
 }
 exports.IdentityRepository = IdentityRepository;
