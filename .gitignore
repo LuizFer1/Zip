@@ -1,0 +1,8 @@
+﻿node_modules/
+npm-debug.log*
+
+# TypeScript compiled output (gerado por tsc)
+src/**/*.js
+src/**/*.js.map
+
+/src/generated/prisma

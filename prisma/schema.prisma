@@ -1,0 +1,47 @@
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Event {
+  id         String  @id
+  channelId  String
+  author     String
+  timestamp  Int
+  type       String
+  payload    Bytes
+  prev       String
+  signature  String
+
+  @@index([channelId])
+  @@index([timestamp])
+}
+
+model Channel {
+  id        String @id
+  creator   String
+  createdAt Int
+}
+
+model Identity {
+  publicKey String @id
+  username  String?
+  avatar    String?
+  updatedAt Int
+}
+
+model ChannelKey {
+  channelId     String @id
+  publicKey     String
+  privateKey    String?
+  encryptionKey String
+}
+
+model Peer {
+  publicKey String @id
+  lastSeen  Int
+  addresses String
+}

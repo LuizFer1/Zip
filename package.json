@@ -1,0 +1,23 @@
+{
+  "name": "zip",
+  "version": "0.1.0",
+  "description": "Zip desktop app built with Electron",
+  "main": "dist/main/main.js",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsc && electron .",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "electron": "^30.0.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.0.1",
+    "@prisma/client": "^7.4.1",
+    "better-sqlite3": "^12.6.2",
+    "prisma": "^7.4.1"
+  }
+}
