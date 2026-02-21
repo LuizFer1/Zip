@@ -1,5 +1,5 @@
 "use strict";
-// ── Types ───────────────────────────────────────────────────
+Object.defineProperty(exports, "__esModule", { value: true });
 // ── State ───────────────────────────────────────────────────
 const state = {
     view: 'home',

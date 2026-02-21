@@ -18,11 +18,15 @@ export type EventType =
 // ─────────────────────────────────────────────
 
 export interface Identity {
-  publicKey: string;       
-  privateKey?: string; 
+  publicKey: any;       
+  privateKey?: any; 
   username: string;
-  avatar?: string;
+  avatar: string | null;
   createdAt: number;
+}
+
+export interface LocalIdentity extends Identity {
+  privateKey?: any; 
 }
 
 // ─────────────────────────────────────────────
