@@ -13,11 +13,13 @@ model Event {
   timestamp  Int
   type       String
   payload    Bytes
-  prev       String
+  prev       Json
   signature  String
 
   @@index([channelId])
   @@index([timestamp])
+  @@index([author])
+  @@index([channelId, timestamp])
 }
 
 model Channel {
@@ -33,15 +35,35 @@ model Identity {
   updatedAt Int
 }
 
+model LocalIdentity {
+  id         Int    @id @default(1)
+  publicKey  String
+  privateKey String
+  avatar    String?
+  username  String
+  createdAt  Int
+}
+
 model ChannelKey {
   channelId     String @id
   publicKey     String
   privateKey    String?
   encryptionKey String
+
+  @@index([publicKey])
+}
+
+model ChannelHead {
+  channelId String
+  eventId   String
+
+  @@id([channelId, eventId])
 }
 
 model Peer {
   publicKey String @id
   lastSeen  Int
   addresses String
+
+  @@index([lastSeen])
 }
