@@ -54,19 +54,30 @@ export interface Contact {
 // ─────────────────────────────────────────────
 
 export interface EventRef {
-  id: string;              
-  hash: string;            
+  id: string;
+  hash: string;
 }
 
 export interface Event<T = any> {
-  id: string;               
+  id: string;
   channelId: string;
-  author: string;           
+  author: string;
   timestamp: number;
   type: EventType;
-  payload: Uint8Array;     
-  prev: EventRef;          
-  signature: string;        
+  payload: Uint8Array;
+  prev: EventRef;
+  signature: string;
+}
+
+export interface SerializedEvent {
+  id: string;
+  channelId: string;
+  author: string;
+  timestamp: number;
+  type: EventType;
+  payload: string;
+  prev: EventRef;
+  signature: string;
 }
 
 // ─────────────────────────────────────────────
@@ -125,7 +136,7 @@ export interface ProfileUpdatePayload {
 
 export interface DerivedMessage {
   id: string;
-  author: string;           // publicKey
+  author: string;  // publicKey
   content: string;
   timestamp: number;
   edited: boolean;
@@ -145,7 +156,7 @@ export interface DerivedChannelState {
 export interface UIProfile {
   publicKey: string;
   username: string;
-  avatar: string;           // initials or URL
+  avatar: string;  // initials or URL
 }
 
 export interface UIChannel {
@@ -158,8 +169,8 @@ export interface UIChannel {
 
 export interface UIMessage {
   id: string;
-  author: string;           // display name
-  authorKey: string;        // publicKey
+  author: string;  // display name
+  authorKey: string;  // publicKey
   own: boolean;
   content: string;
   time: string;
@@ -185,4 +196,26 @@ export interface ZipAPI {
   createChannel(name: string, description?: string): Promise<UIChannel>;
   listMessages(channelId: string): Promise<UIMessage[]>;
   sendMessage(channelId: string, content: string): Promise<void>;
+}
+
+// ─────────────────────────────────────────────
+// Hashing and Signature Types
+// ─────────────────────────────────────────────
+
+export interface EventHasher {
+  hash(data: Uint8Array): string;
+}
+
+export interface EventSigner {
+  sign(event: Event, privateKey: Uint8Array): string;
+  verify(event: Event, publicKey: Uint8Array): boolean;
+}
+
+
+// ─────────────────────────────────────────────
+// Validation and Error Types
+// ─────────────────────────────────────────────
+
+export interface EventValidator {
+  validate(event: Event): Promise<void>;
 }

@@ -14,10 +14,10 @@ class IdentityService {
         return identity;
     }
     async createLocalIdentity(username, avatar) {
-        const { encryptedPrivateKey, publicKey } = (0, keypair_1.generateKeyPair)();
+        const { privateKey, publicKey } = (0, keypair_1.generateKeyPair)();
         const identity = {
             publicKey,
-            privateKey: JSON.stringify(encryptedPrivateKey),
+            privateKey,
             username,
             avatar,
             createdAt: Date.now(),
