@@ -22,11 +22,11 @@ export class IdentityService {
     username: string,
     avatar: string | null,
   ): Promise<Identity> {
-    const { privateKey, publicKey } = generateKeyPair();
+    const { encryptedPrivateKey, publicKey } = generateKeyPair();
 
     const identity: Identity = {
       publicKey,
-      privateKey,
+      privateKey: JSON.stringify(encryptedPrivateKey),
       username,
       avatar,
       createdAt: Date.now(),
