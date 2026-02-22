@@ -53,15 +53,20 @@ export interface Contact {
 // Events
 // ─────────────────────────────────────────────
 
+export interface EventRef {
+  id: string;              
+  hash: string;            
+}
+
 export interface Event<T = any> {
-  id: string;               // hash determinístico
+  id: string;               
   channelId: string;
-  author: string;           // publicKey
+  author: string;           
   timestamp: number;
   type: EventType;
-  payload: T;
-  prev: string[];           // DAG refs
-  signature: string;        // assinatura ed25519
+  payload: Uint8Array;     
+  prev: EventRef;          
+  signature: string;        
 }
 
 // ─────────────────────────────────────────────
