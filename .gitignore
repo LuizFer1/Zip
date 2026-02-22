@@ -8,3 +8,4 @@ src/**/*.js.map
 /src/generated/prisma
 
 *.db
+.env
