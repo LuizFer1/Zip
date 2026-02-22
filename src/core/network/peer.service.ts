@@ -3,17 +3,21 @@ import { PeerAddress, P2PTransport, TransportPeerInfo } from './transport';
 export interface PeerServiceOptions {
   seeds?: PeerAddress[];
   reconnectIntervalMs?: number;
+  logger?: Pick<Console, 'info' | 'warn'>;
 }
 
 const DEFAULT_RECONNECT_INTERVAL_MS = 15_000;
 
 export class PeerService {
   private reconnectTimer?: NodeJS.Timeout;
+  private readonly logger: Pick<Console, 'info' | 'warn'>;
 
   constructor(
     private readonly transport: P2PTransport,
     private readonly options: PeerServiceOptions = {},
-  ) {}
+  ) {
+    this.logger = options.logger ?? console;
+  }
 
   async start(): Promise<void> {
     await this.transport.start();
@@ -53,8 +57,9 @@ export class PeerService {
 
       try {
         await this.transport.connect(seed);
+        this.logger.info(`[peer] connected seed ${seed.host}:${seed.port}`);
       } catch {
-        // Best-effort reconnection for unstable P2P links.
+        this.logger.warn(`[peer] failed connecting seed ${seed.host}:${seed.port}`);
       }
     }
   }

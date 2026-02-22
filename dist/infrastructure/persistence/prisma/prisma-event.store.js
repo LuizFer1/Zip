@@ -43,6 +43,14 @@ class PrismaEventStore {
         });
         return rows.map((row) => event_mapper_1.EventMapper.toDomain(row));
     }
+    async listChannelIds() {
+        const rows = await this.db.event.findMany({
+            distinct: ['channelId'],
+            select: { channelId: true },
+            orderBy: { channelId: 'asc' },
+        });
+        return rows.map((row) => row.channelId);
+    }
     async getLast(channelId) {
         const row = await this.db.event.findFirst({
             where: { channelId },

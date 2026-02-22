@@ -1,10 +1,24 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.EventService = void 0;
+exports.EventService = exports.EventChainValidationError = exports.DuplicateEventError = void 0;
 const event_factory_1 = require("./event.factory");
 const event_hash_1 = require("./event.hash");
 const event_serializer_1 = require("./event.serializer");
 const event_sing_1 = require("./event.sing");
+class DuplicateEventError extends Error {
+    constructor(eventId) {
+        super(`Duplicate event id: ${eventId}`);
+        this.name = 'DuplicateEventError';
+    }
+}
+exports.DuplicateEventError = DuplicateEventError;
+class EventChainValidationError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'EventChainValidationError';
+    }
+}
+exports.EventChainValidationError = EventChainValidationError;
 class EventService {
     constructor(store, signer = new event_sing_1.EventSignerImpl(), hasher = new event_hash_1.EventHasherImpl()) {
         this.store = store;
@@ -15,10 +29,12 @@ class EventService {
         const prev = input.prev ?? await this.resolvePrevRef(input.channelId);
         const event = event_factory_1.EventFactory.create(input.channelId, input.author, input.type, input.payload, prev, '');
         event.signature = this.signer.sign(event, input.privateKey);
+        await this.assertCanAppend(event);
         await this.store.append(event);
         return event;
     }
     async ingest(event) {
+        await this.assertCanAppend(event);
         await this.store.append(event);
     }
     async getById(id) {
@@ -26,6 +42,9 @@ class EventService {
     }
     async listByChannel(channelId, options = {}) {
         return this.store.getChannelEvents(channelId, options);
+    }
+    async listChannelIds() {
+        return this.store.listChannelIds();
     }
     async exists(id) {
         return this.store.exists(id);
@@ -39,6 +58,7 @@ class EventService {
     }
     async deserializeAndIngest(serializedEvent) {
         const event = event_serializer_1.EventSerializer.deserialize(serializedEvent);
+        await this.assertCanAppend(event);
         await this.store.append(event);
         return event;
     }
@@ -52,6 +72,50 @@ class EventService {
             id: previous.id,
             hash,
         };
+    }
+    async assertCanAppend(event) {
+        await this.assertNotDuplicate(event);
+        await this.assertPrevMatchesChannelHead(event);
+    }
+    async assertNotDuplicate(event) {
+        const existing = await this.store.getById(event.id);
+        if (!existing) {
+            return;
+        }
+        if (this.eventsEqual(existing, event)) {
+            throw new DuplicateEventError(event.id);
+        }
+        throw new EventChainValidationError(`Event id conflict detected: ${event.id}`);
+    }
+    async assertPrevMatchesChannelHead(event) {
+        const head = await this.store.getLast(event.channelId);
+        const hasPrev = event.prev.id.trim().length > 0 || event.prev.hash.trim().length > 0;
+        if (!head) {
+            if (!hasPrev) {
+                return;
+            }
+            throw new EventChainValidationError(`Invalid prev for first event in channel "${event.channelId}": expected empty prev`);
+        }
+        if (!hasPrev) {
+            throw new EventChainValidationError(`Invalid prev for channel "${event.channelId}": missing prev reference`);
+        }
+        const expectedHash = this.hasher.hash(event_serializer_1.EventSerializer.canonicalBytes(head, false));
+        if (event.prev.id !== head.id || event.prev.hash !== expectedHash) {
+            throw new EventChainValidationError(`Invalid prev for channel "${event.channelId}": expected (${head.id}, ${expectedHash})`);
+        }
+    }
+    eventsEqual(a, b) {
+        const left = event_serializer_1.EventSerializer.canonicalBytes(a, true);
+        const right = event_serializer_1.EventSerializer.canonicalBytes(b, true);
+        if (left.length !== right.length) {
+            return false;
+        }
+        for (let i = 0; i < left.length; i += 1) {
+            if (left[i] !== right[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 }
 exports.EventService = EventService;

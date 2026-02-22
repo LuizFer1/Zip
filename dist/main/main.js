@@ -9,10 +9,15 @@ const node_path_1 = __importDefault(require("node:path"));
 require("dotenv/config");
 const identity_service_1 = require("../core/indentity/identity.service");
 const peer_service_1 = require("../core/network/peer.service");
+const presence_service_1 = require("../core/network/presence.service");
 const transport_1 = require("../core/network/transport");
+const logger_1 = require("../core/observability/logger");
 const event_serializer_1 = require("../core/protocol/event.serializer");
 const event_service_1 = require("../core/protocol/event.service");
 const gossip_service_1 = require("../core/replication/gossip.service");
+const sync_service_1 = require("../core/replication/sync.service");
+const backup_service_1 = require("../core/storage/backup.service");
+const database_path_1 = require("../core/storage/database.path");
 const prisma_client_1 = require("../core/storage/prisma.client");
 const prisma_channel_repository_1 = require("../infrastructure/persistence/prisma/prisma-channel.repository");
 const prisma_event_store_1 = require("../infrastructure/persistence/prisma/prisma-event.store");
@@ -23,13 +28,24 @@ const identityService = new identity_service_1.IdentityService(identityRepo);
 const channelRepository = new prisma_channel_repository_1.PrismaChannelRepository();
 const eventStore = new prisma_event_store_1.PrismaEventStore();
 const eventService = new event_service_1.EventService(eventStore);
+const syncService = new sync_service_1.SyncService(eventService);
+const p2pLogger = new logger_1.StructuredLogger('p2p');
 let peerService = null;
 let gossipService = null;
+let presenceService = null;
+let gossipMetricsTimer = null;
+let backupService = null;
+let backupTimer = null;
 const P2P_ENABLED = (process.env.ZIP_P2P_ENABLED ?? 'true').toLowerCase() !== 'false';
 const P2P_HOST = process.env.ZIP_P2P_HOST ?? '0.0.0.0';
 const P2P_PORT = parsePort(process.env.ZIP_P2P_PORT, 7070);
 const P2P_SEEDS = parsePeerSeeds(process.env.ZIP_P2P_SEEDS ?? process.env.ZIP_P2P_SEED);
 const P2P_NODE_ID = process.env.ZIP_P2P_NODE_ID?.trim();
+const BACKUP_ENABLED = (process.env.ZIP_BACKUP_ENABLED ?? 'false').toLowerCase() === 'true';
+const BACKUP_INTERVAL_MS = parsePositiveInt(process.env.ZIP_BACKUP_INTERVAL_MS, 5 * 60000);
+const BACKUP_DIR = process.env.ZIP_BACKUP_DIR;
+const BACKUP_HTTP_ENDPOINT = process.env.ZIP_BACKUP_HTTP_ENDPOINT?.trim();
+const BACKUP_HTTP_TOKEN = process.env.ZIP_BACKUP_HTTP_TOKEN?.trim();
 // ── IPC Helpers ───────────────────────────────────────────────
 function initials(username) {
     return username
@@ -101,6 +117,16 @@ function parsePort(rawPort, fallback) {
     }
     return parsed;
 }
+function parsePositiveInt(rawValue, fallback) {
+    if (!rawValue) {
+        return fallback;
+    }
+    const parsed = Number.parseInt(rawValue, 10);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    return parsed;
+}
 function parsePeerSeeds(rawSeeds) {
     if (!rawSeeds) {
         return [];
@@ -139,6 +165,54 @@ function isSameHost(a, b) {
     };
     return normalize(a) === normalize(b);
 }
+function createBackupService() {
+    if (!BACKUP_ENABLED) {
+        return null;
+    }
+    const dbPath = (0, database_path_1.resolveDatabasePath)();
+    const services = [
+        new backup_service_1.FileBackupService(dbPath, BACKUP_DIR),
+    ];
+    if (BACKUP_HTTP_ENDPOINT) {
+        services.push(new backup_service_1.HttpBackupService(dbPath, BACKUP_HTTP_ENDPOINT, BACKUP_HTTP_TOKEN));
+    }
+    return new backup_service_1.CompositeBackupService(services);
+}
+function startBackupLoop() {
+    backupService = createBackupService();
+    if (!backupService) {
+        return;
+    }
+    if (backupTimer) {
+        clearInterval(backupTimer);
+        backupTimer = null;
+    }
+    const runBackup = async () => {
+        if (!backupService) {
+            return;
+        }
+        try {
+            await backupService.backup();
+            p2pLogger.info('backup.success', { intervalMs: BACKUP_INTERVAL_MS });
+        }
+        catch (error) {
+            p2pLogger.warn('backup.failed', {
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    };
+    backupTimer = setInterval(() => {
+        void runBackup();
+    }, BACKUP_INTERVAL_MS);
+    backupTimer.unref();
+    void runBackup();
+}
+function stopBackupLoop() {
+    if (backupTimer) {
+        clearInterval(backupTimer);
+        backupTimer = null;
+    }
+}
 async function startP2P() {
     if (!P2P_ENABLED || peerService || gossipService) {
         return;
@@ -155,17 +229,34 @@ async function startP2P() {
     });
     transport.on('warning', ({ error }) => {
         const details = error instanceof Error ? error.message : String(error);
-        console.warn(`[p2p] warning: ${details}`);
+        p2pLogger.warn('transport.warning', { details });
     });
     transport.on('peer:connected', ({ nodeId: remoteNodeId, remote }) => {
-        console.info(`[p2p] peer connected ${remoteNodeId ?? 'unknown'} (${remote.host}:${remote.port})`);
+        p2pLogger.info('peer.connected', {
+            remoteNodeId: remoteNodeId ?? 'unknown',
+            host: remote.host,
+            port: remote.port,
+        });
         emitP2PStatus();
+        if (remoteNodeId && gossipService) {
+            void gossipService.requestSyncFromPeer(remoteNodeId);
+        }
     });
     transport.on('peer:disconnected', ({ nodeId: remoteNodeId, remote }) => {
-        console.info(`[p2p] peer disconnected ${remoteNodeId ?? 'unknown'} (${remote.host}:${remote.port})`);
+        p2pLogger.info('peer.disconnected', {
+            remoteNodeId: remoteNodeId ?? 'unknown',
+            host: remote.host,
+            port: remote.port,
+        });
         emitP2PStatus();
     });
-    peerService = new peer_service_1.PeerService(transport, { seeds });
+    peerService = new peer_service_1.PeerService(transport, {
+        seeds,
+        logger: {
+            info: (message) => p2pLogger.info('peer.info', { message }),
+            warn: (message) => p2pLogger.warn('peer.warn', { message }),
+        },
+    });
     gossipService = new gossip_service_1.GossipService(transport, eventService, {
         onEventIngested: async (event) => {
             if (event.type === 'channel.create') {
@@ -177,15 +268,40 @@ async function startP2P() {
             }
             emitUIEventUpdate(event, 'remote');
         },
-        logger: console,
+        logger: {
+            info: (message) => p2pLogger.info('gossip.info', { message }),
+            warn: (message) => p2pLogger.warn('gossip.warn', { message }),
+        },
+        sync: {
+            buildCursor: () => syncService.buildCursor(),
+            collectMissingEvents: (cursors, maxEvents) => syncService.collectMissingEvents(cursors, maxEvents),
+        },
+    });
+    presenceService = new presence_service_1.PresenceService(transport, {
+        logger: {
+            info: (message) => p2pLogger.info('presence.info', { message }),
+            warn: (message) => p2pLogger.warn('presence.warn', { message }),
+        },
     });
     gossipService.start();
+    presenceService.start();
     try {
         await peerService.start();
-        console.info(`[p2p] listening on ${P2P_HOST}:${P2P_PORT} with ${seeds.length} seed(s)`);
+        p2pLogger.info('listening', { host: P2P_HOST, port: P2P_PORT, seeds: seeds.length });
+        if (!gossipMetricsTimer) {
+            gossipMetricsTimer = setInterval(() => {
+                if (!gossipService) {
+                    return;
+                }
+                p2pLogger.info('metrics', { ...gossipService.snapshotMetrics() });
+            }, 30000);
+            gossipMetricsTimer.unref();
+        }
         emitP2PStatus();
     }
     catch (error) {
+        presenceService.stop();
+        presenceService = null;
         gossipService.stop();
         gossipService = null;
         peerService = null;
@@ -194,9 +310,17 @@ async function startP2P() {
     }
 }
 async function stopP2P() {
+    if (gossipMetricsTimer) {
+        clearInterval(gossipMetricsTimer);
+        gossipMetricsTimer = null;
+    }
     if (gossipService) {
         gossipService.stop();
         gossipService = null;
+    }
+    if (presenceService) {
+        presenceService.stop();
+        presenceService = null;
     }
     if (peerService) {
         await peerService.stop();
@@ -379,7 +503,9 @@ electron_1.ipcMain.handle('p2p:connect', async () => {
         await startP2P();
     }
     catch (error) {
-        console.warn(`[p2p] connect failed: ${error.message}`);
+        p2pLogger.warn('connect.failed', {
+            message: error.message,
+        });
     }
     return getP2PStatus();
 });
@@ -405,6 +531,7 @@ function createWindow() {
     mainWindow.loadFile(node_path_1.default.join(__dirname, '..', '..', 'src', 'renderer', 'index.html'));
 }
 electron_1.app.whenReady().then(() => {
+    startBackupLoop();
     createWindow();
     electron_1.app.on('activate', () => {
         if (electron_1.BrowserWindow.getAllWindows().length === 0) {
@@ -418,5 +545,6 @@ electron_1.app.on('window-all-closed', () => {
     }
 });
 electron_1.app.on('before-quit', () => {
+    stopBackupLoop();
     void stopP2P();
 });

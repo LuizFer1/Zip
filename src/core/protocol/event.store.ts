@@ -11,6 +11,7 @@ export interface EventStore {
   append(event: Event): Promise<void>;
   getById(id: string): Promise<Event | null>;
   getChannelEvents(channelId: string, options?: EventListOptions): Promise<Event[]>;
+  listChannelIds(): Promise<string[]>;
   getLast(channelId: string): Promise<Event | null>;
   exists(id: string): Promise<boolean>;
 }

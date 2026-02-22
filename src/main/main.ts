@@ -4,10 +4,20 @@ import path from 'node:path';
 import 'dotenv/config';
 import { IdentityService } from '../core/indentity/identity.service';
 import { PeerService } from '../core/network/peer.service';
+import { PresenceService } from '../core/network/presence.service';
 import { P2PTransport, PeerAddress } from '../core/network/transport';
+import { StructuredLogger } from '../core/observability/logger';
 import { EventSerializer } from '../core/protocol/event.serializer';
 import { EventService } from '../core/protocol/event.service';
 import { GossipService } from '../core/replication/gossip.service';
+import { SyncService } from '../core/replication/sync.service';
+import {
+  BackupService,
+  CompositeBackupService,
+  FileBackupService,
+  HttpBackupService,
+} from '../core/storage/backup.service';
+import { resolveDatabasePath } from '../core/storage/database.path';
 import { prisma } from '../core/storage/prisma.client';
 import { ChannelRepository } from '../core/storage/chanel.repository';
 import { PrismaChannelRepository } from '../infrastructure/persistence/prisma/prisma-channel.repository';
@@ -29,14 +39,25 @@ const identityService = new IdentityService(identityRepo);
 const channelRepository: ChannelRepository = new PrismaChannelRepository();
 const eventStore = new PrismaEventStore();
 const eventService = new EventService(eventStore);
+const syncService = new SyncService(eventService);
+const p2pLogger = new StructuredLogger('p2p');
 let peerService: PeerService | null = null;
 let gossipService: GossipService | null = null;
+let presenceService: PresenceService | null = null;
+let gossipMetricsTimer: NodeJS.Timeout | null = null;
+let backupService: BackupService | null = null;
+let backupTimer: NodeJS.Timeout | null = null;
 
 const P2P_ENABLED = (process.env.ZIP_P2P_ENABLED ?? 'true').toLowerCase() !== 'false';
 const P2P_HOST = process.env.ZIP_P2P_HOST ?? '0.0.0.0';
 const P2P_PORT = parsePort(process.env.ZIP_P2P_PORT, 7070);
 const P2P_SEEDS = parsePeerSeeds(process.env.ZIP_P2P_SEEDS ?? process.env.ZIP_P2P_SEED);
 const P2P_NODE_ID = process.env.ZIP_P2P_NODE_ID?.trim();
+const BACKUP_ENABLED = (process.env.ZIP_BACKUP_ENABLED ?? 'false').toLowerCase() === 'true';
+const BACKUP_INTERVAL_MS = parsePositiveInt(process.env.ZIP_BACKUP_INTERVAL_MS, 5 * 60_000);
+const BACKUP_DIR = process.env.ZIP_BACKUP_DIR;
+const BACKUP_HTTP_ENDPOINT = process.env.ZIP_BACKUP_HTTP_ENDPOINT?.trim();
+const BACKUP_HTTP_TOKEN = process.env.ZIP_BACKUP_HTTP_TOKEN?.trim();
 
 // ── IPC Helpers ───────────────────────────────────────────────
 
@@ -122,6 +143,17 @@ function parsePort(rawPort: string | undefined, fallback: number): number {
   return parsed;
 }
 
+function parsePositiveInt(rawValue: string | undefined, fallback: number): number {
+  if (!rawValue) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
 function parsePeerSeeds(rawSeeds: string | undefined): PeerAddress[] {
   if (!rawSeeds) {
     return [];
@@ -167,6 +199,63 @@ function isSameHost(a: string, b: string): boolean {
   return normalize(a) === normalize(b);
 }
 
+function createBackupService(): BackupService | null {
+  if (!BACKUP_ENABLED) {
+    return null;
+  }
+
+  const dbPath = resolveDatabasePath();
+  const services: BackupService[] = [
+    new FileBackupService(dbPath, BACKUP_DIR),
+  ];
+
+  if (BACKUP_HTTP_ENDPOINT) {
+    services.push(new HttpBackupService(dbPath, BACKUP_HTTP_ENDPOINT, BACKUP_HTTP_TOKEN));
+  }
+
+  return new CompositeBackupService(services);
+}
+
+function startBackupLoop(): void {
+  backupService = createBackupService();
+  if (!backupService) {
+    return;
+  }
+
+  if (backupTimer) {
+    clearInterval(backupTimer);
+    backupTimer = null;
+  }
+
+  const runBackup = async (): Promise<void> => {
+    if (!backupService) {
+      return;
+    }
+    try {
+      await backupService.backup();
+      p2pLogger.info('backup.success', { intervalMs: BACKUP_INTERVAL_MS });
+    } catch (error) {
+      p2pLogger.warn('backup.failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  backupTimer = setInterval(() => {
+    void runBackup();
+  }, BACKUP_INTERVAL_MS);
+  backupTimer.unref();
+
+  void runBackup();
+}
+
+function stopBackupLoop(): void {
+  if (backupTimer) {
+    clearInterval(backupTimer);
+    backupTimer = null;
+  }
+}
+
 async function startP2P(): Promise<void> {
   if (!P2P_ENABLED || peerService || gossipService) {
     return;
@@ -185,20 +274,37 @@ async function startP2P(): Promise<void> {
 
   transport.on('warning', ({ error }: { error: unknown }) => {
     const details = error instanceof Error ? error.message : String(error);
-    console.warn(`[p2p] warning: ${details}`);
+    p2pLogger.warn('transport.warning', { details });
   });
 
   transport.on('peer:connected', ({ nodeId: remoteNodeId, remote }: { nodeId?: string; remote: PeerAddress }) => {
-    console.info(`[p2p] peer connected ${remoteNodeId ?? 'unknown'} (${remote.host}:${remote.port})`);
+    p2pLogger.info('peer.connected', {
+      remoteNodeId: remoteNodeId ?? 'unknown',
+      host: remote.host,
+      port: remote.port,
+    });
     emitP2PStatus();
+    if (remoteNodeId && gossipService) {
+      void gossipService.requestSyncFromPeer(remoteNodeId);
+    }
   });
 
   transport.on('peer:disconnected', ({ nodeId: remoteNodeId, remote }: { nodeId?: string; remote: PeerAddress }) => {
-    console.info(`[p2p] peer disconnected ${remoteNodeId ?? 'unknown'} (${remote.host}:${remote.port})`);
+    p2pLogger.info('peer.disconnected', {
+      remoteNodeId: remoteNodeId ?? 'unknown',
+      host: remote.host,
+      port: remote.port,
+    });
     emitP2PStatus();
   });
 
-  peerService = new PeerService(transport, { seeds });
+  peerService = new PeerService(transport, {
+    seeds,
+    logger: {
+      info: (message: string) => p2pLogger.info('peer.info', { message }),
+      warn: (message: string) => p2pLogger.warn('peer.warn', { message }),
+    },
+  });
   gossipService = new GossipService(transport, eventService, {
     onEventIngested: async (event) => {
       if (event.type === 'channel.create') {
@@ -211,16 +317,41 @@ async function startP2P(): Promise<void> {
 
       emitUIEventUpdate(event, 'remote');
     },
-    logger: console,
+    logger: {
+      info: (message: string) => p2pLogger.info('gossip.info', { message }),
+      warn: (message: string) => p2pLogger.warn('gossip.warn', { message }),
+    },
+    sync: {
+      buildCursor: () => syncService.buildCursor(),
+      collectMissingEvents: (cursors, maxEvents) => syncService.collectMissingEvents(cursors, maxEvents),
+    },
+  });
+  presenceService = new PresenceService(transport, {
+    logger: {
+      info: (message: string) => p2pLogger.info('presence.info', { message }),
+      warn: (message: string) => p2pLogger.warn('presence.warn', { message }),
+    },
   });
 
   gossipService.start();
+  presenceService.start();
 
   try {
     await peerService.start();
-    console.info(`[p2p] listening on ${P2P_HOST}:${P2P_PORT} with ${seeds.length} seed(s)`);
+    p2pLogger.info('listening', { host: P2P_HOST, port: P2P_PORT, seeds: seeds.length });
+    if (!gossipMetricsTimer) {
+      gossipMetricsTimer = setInterval(() => {
+        if (!gossipService) {
+          return;
+        }
+        p2pLogger.info('metrics', { ...gossipService.snapshotMetrics() });
+      }, 30_000);
+      gossipMetricsTimer.unref();
+    }
     emitP2PStatus();
   } catch (error) {
+    presenceService.stop();
+    presenceService = null;
     gossipService.stop();
     gossipService = null;
     peerService = null;
@@ -230,9 +361,19 @@ async function startP2P(): Promise<void> {
 }
 
 async function stopP2P(): Promise<void> {
+  if (gossipMetricsTimer) {
+    clearInterval(gossipMetricsTimer);
+    gossipMetricsTimer = null;
+  }
+
   if (gossipService) {
     gossipService.stop();
     gossipService = null;
+  }
+
+  if (presenceService) {
+    presenceService.stop();
+    presenceService = null;
   }
 
   if (peerService) {
@@ -428,7 +569,9 @@ ipcMain.handle('p2p:connect', async (): Promise<UIP2PStatus> => {
   try {
     await startP2P();
   } catch (error) {
-    console.warn(`[p2p] connect failed: ${(error as Error).message}`);
+    p2pLogger.warn('connect.failed', {
+      message: (error as Error).message,
+    });
   }
   return getP2PStatus();
 });
@@ -459,6 +602,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  startBackupLoop();
   createWindow();
 
   app.on('activate', () => {
@@ -475,5 +619,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  stopBackupLoop();
   void stopP2P();
 });

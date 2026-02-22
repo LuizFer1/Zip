@@ -55,6 +55,16 @@ export class PrismaEventStore implements EventStore {
     return rows.map((row) => EventMapper.toDomain(row));
   }
 
+  async listChannelIds(): Promise<string[]> {
+    const rows = await this.db.event.findMany({
+      distinct: ['channelId'],
+      select: { channelId: true },
+      orderBy: { channelId: 'asc' },
+    });
+
+    return rows.map((row) => row.channelId);
+  }
+
   async getLast(channelId: string): Promise<Event | null> {
     const row = await this.db.event.findFirst({
       where: { channelId },

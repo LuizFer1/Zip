@@ -6,6 +6,7 @@ class PeerService {
     constructor(transport, options = {}) {
         this.transport = transport;
         this.options = options;
+        this.logger = options.logger ?? console;
     }
     async start() {
         await this.transport.start();
@@ -39,9 +40,10 @@ class PeerService {
             }
             try {
                 await this.transport.connect(seed);
+                this.logger.info(`[peer] connected seed ${seed.host}:${seed.port}`);
             }
             catch {
-                // Best-effort reconnection for unstable P2P links.
+                this.logger.warn(`[peer] failed connecting seed ${seed.host}:${seed.port}`);
             }
         }
     }

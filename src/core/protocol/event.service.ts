@@ -23,6 +23,20 @@ export interface PublishEventInput<T = unknown> {
   prev?: EventRef;
 }
 
+export class DuplicateEventError extends Error {
+  constructor(eventId: string) {
+    super(`Duplicate event id: ${eventId}`);
+    this.name = 'DuplicateEventError';
+  }
+}
+
+export class EventChainValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EventChainValidationError';
+  }
+}
+
 export class EventService {
   constructor(
     private readonly store: EventStore,
@@ -42,11 +56,13 @@ export class EventService {
     );
     event.signature = this.signer.sign(event, input.privateKey);
 
+    await this.assertCanAppend(event);
     await this.store.append(event);
     return event;
   }
 
   async ingest(event: Event): Promise<void> {
+    await this.assertCanAppend(event);
     await this.store.append(event);
   }
 
@@ -59,6 +75,10 @@ export class EventService {
     options: EventListOptions = {},
   ): Promise<Event[]> {
     return this.store.getChannelEvents(channelId, options);
+  }
+
+  async listChannelIds(): Promise<string[]> {
+    return this.store.listChannelIds();
   }
 
   async exists(id: string): Promise<boolean> {
@@ -75,6 +95,7 @@ export class EventService {
 
   async deserializeAndIngest(serializedEvent: string): Promise<Event> {
     const event = EventSerializer.deserialize(serializedEvent);
+    await this.assertCanAppend(event);
     await this.store.append(event);
     return event;
   }
@@ -91,5 +112,66 @@ export class EventService {
       id: previous.id,
       hash,
     };
+  }
+
+  private async assertCanAppend(event: Event): Promise<void> {
+    await this.assertNotDuplicate(event);
+    await this.assertPrevMatchesChannelHead(event);
+  }
+
+  private async assertNotDuplicate(event: Event): Promise<void> {
+    const existing = await this.store.getById(event.id);
+    if (!existing) {
+      return;
+    }
+
+    if (this.eventsEqual(existing, event)) {
+      throw new DuplicateEventError(event.id);
+    }
+
+    throw new EventChainValidationError(`Event id conflict detected: ${event.id}`);
+  }
+
+  private async assertPrevMatchesChannelHead(event: Event): Promise<void> {
+    const head = await this.store.getLast(event.channelId);
+    const hasPrev = event.prev.id.trim().length > 0 || event.prev.hash.trim().length > 0;
+
+    if (!head) {
+      if (!hasPrev) {
+        return;
+      }
+      throw new EventChainValidationError(
+        `Invalid prev for first event in channel "${event.channelId}": expected empty prev`,
+      );
+    }
+
+    if (!hasPrev) {
+      throw new EventChainValidationError(
+        `Invalid prev for channel "${event.channelId}": missing prev reference`,
+      );
+    }
+
+    const expectedHash = this.hasher.hash(EventSerializer.canonicalBytes(head, false));
+    if (event.prev.id !== head.id || event.prev.hash !== expectedHash) {
+      throw new EventChainValidationError(
+        `Invalid prev for channel "${event.channelId}": expected (${head.id}, ${expectedHash})`,
+      );
+    }
+  }
+
+  private eventsEqual(a: Event, b: Event): boolean {
+    const left = EventSerializer.canonicalBytes(a, true);
+    const right = EventSerializer.canonicalBytes(b, true);
+    if (left.length !== right.length) {
+      return false;
+    }
+
+    for (let i = 0; i < left.length; i += 1) {
+      if (left[i] !== right[i]) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }
