@@ -1,11 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PrismaEventStore = void 0;
+const event_sing_1 = require("../../../core/protocol/event.sing");
 const events_validator_1 = require("../../../core/protocol/events.validator");
 const prisma_client_1 = require("../../../core/storage/prisma.client");
 const event_mapper_1 = require("./event.mapper");
 class PrismaEventStore {
-    constructor(validator = new events_validator_1.SimpleEventValidator(), db = prisma_client_1.prisma) {
+    constructor(validator = new events_validator_1.SimpleEventValidator(new event_sing_1.EventSignerImpl()), db = prisma_client_1.prisma) {
         this.validator = validator;
         this.db = db;
     }

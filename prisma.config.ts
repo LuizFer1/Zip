@@ -9,6 +9,6 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: "file:./zip.db",
+    url: "file:./zip-node1.db",
   },
 });

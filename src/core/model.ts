@@ -18,15 +18,15 @@ export type EventType =
 // ─────────────────────────────────────────────
 
 export interface Identity {
-  publicKey: any;
-  privateKey?: any;
+  publicKey: string;
+  privateKey?: string;
   username: string;
   avatar: string | null;
   createdAt: number;
 }
 
 export interface LocalIdentity extends Identity {
-  privateKey?: any;
+  privateKey?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -178,6 +178,22 @@ export interface UIMessage {
   deleted: boolean;
 }
 
+export interface UIEventUpdate {
+  id: string;
+  channelId: string;
+  type: EventType;
+  source: 'local' | 'remote';
+  timestamp: number;
+}
+
+export interface UIP2PStatus {
+  enabled: boolean;
+  connected: boolean;
+  peers: number;
+  host: string;
+  port: number;
+}
+
 export interface UIAppState {
   profile: UIProfile | null;
   channels: UIChannel[];
@@ -196,6 +212,11 @@ export interface ZipAPI {
   createChannel(name: string, description?: string): Promise<UIChannel>;
   listMessages(channelId: string): Promise<UIMessage[]>;
   sendMessage(channelId: string, content: string): Promise<void>;
+  connectP2P(): Promise<UIP2PStatus>;
+  disconnectP2P(): Promise<UIP2PStatus>;
+  getP2PStatus(): Promise<UIP2PStatus>;
+  onEventsChanged(listener: (update: UIEventUpdate) => void): () => void;
+  onP2PStatusChanged(listener: (status: UIP2PStatus) => void): () => void;
 }
 
 // ─────────────────────────────────────────────

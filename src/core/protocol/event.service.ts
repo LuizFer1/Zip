@@ -19,7 +19,7 @@ export interface PublishEventInput<T = unknown> {
   author: string;
   type: EventType;
   payload: T;
-  privateKey?: Uint8Array;
+  privateKey: Uint8Array;
   prev?: EventRef;
 }
 
@@ -40,10 +40,7 @@ export class EventService {
       prev,
       '',
     );
-
-    if (input.privateKey) {
-      event.signature = this.signer.sign(event, input.privateKey);
-    }
+    event.signature = this.signer.sign(event, input.privateKey);
 
     await this.store.append(event);
     return event;

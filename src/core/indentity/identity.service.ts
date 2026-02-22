@@ -1,6 +1,14 @@
 import { Identity } from "../model";
 import { IdentityRepository } from "./identity.repository";
 import { generateKeyPair } from "./keypair";
+import { decryptPrivateKey } from "../utils/encrypt";
+
+interface EncryptedPrivateKey {
+  encrypted: string;
+  iv: string;
+  tag: string;
+  salt?: string;
+}
 
 export class IdentityService {
   private repository: IdentityRepository;
@@ -9,13 +17,8 @@ export class IdentityService {
     this.repository = repository;
   }
 
-  async loadLocalIdentity(): Promise<Identity | string | undefined> {
-    const identity = this.repository.getLocalIdentity();
-
-    if (identity === undefined) {
-      return undefined; 
-    }
-    return identity;
+  async loadLocalIdentity(): Promise<Identity | undefined> {
+    return this.repository.getLocalIdentity();
   }
 
   async createLocalIdentity(
@@ -58,5 +61,35 @@ export class IdentityService {
 
   async getAllIdentities(): Promise<Identity[]> {
     return this.repository.getAllIdentities();
+  }
+
+  async getLocalPrivateKey(): Promise<Uint8Array> {
+    const identity = await this.repository.getLocalIdentity();
+    if (!identity?.privateKey || typeof identity.privateKey !== 'string') {
+      throw new Error('No local private key found');
+    }
+
+    const encrypted = this.parseEncryptedPrivateKey(identity.privateKey);
+    const privateKey = decryptPrivateKey(encrypted);
+    return Uint8Array.from(privateKey);
+  }
+
+  private parseEncryptedPrivateKey(serialized: string): EncryptedPrivateKey {
+    const parsed = JSON.parse(serialized) as Partial<EncryptedPrivateKey>;
+
+    if (
+      typeof parsed.encrypted !== 'string'
+      || typeof parsed.iv !== 'string'
+      || typeof parsed.tag !== 'string'
+    ) {
+      throw new Error('Invalid encrypted private key format');
+    }
+
+    return {
+      encrypted: parsed.encrypted,
+      iv: parsed.iv,
+      tag: parsed.tag,
+      salt: parsed.salt,
+    };
   }
 }

@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { Event, EventValidator } from '../../../core/model';
+import { EventSignerImpl } from '../../../core/protocol/event.sing';
 import { EventListOptions, EventStore } from '../../../core/protocol/event.store';
 import { SimpleEventValidator } from '../../../core/protocol/events.validator';
 import { prisma } from '../../../core/storage/prisma.client';
@@ -7,7 +8,7 @@ import { EventMapper } from './event.mapper';
 
 export class PrismaEventStore implements EventStore {
   constructor(
-    private readonly validator: EventValidator = new SimpleEventValidator(),
+    private readonly validator: EventValidator = new SimpleEventValidator(new EventSignerImpl()),
     private readonly db: PrismaClient = prisma,
   ) {}
 

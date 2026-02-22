@@ -4,13 +4,32 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
+const node_crypto_1 = require("node:crypto");
 const node_path_1 = __importDefault(require("node:path"));
-const identity_repository_1 = require("../core/indentity/identity.repository");
+require("dotenv/config");
 const identity_service_1 = require("../core/indentity/identity.service");
+const peer_service_1 = require("../core/network/peer.service");
+const transport_1 = require("../core/network/transport");
+const event_serializer_1 = require("../core/protocol/event.serializer");
+const event_service_1 = require("../core/protocol/event.service");
+const gossip_service_1 = require("../core/replication/gossip.service");
 const prisma_client_1 = require("../core/storage/prisma.client");
+const prisma_channel_repository_1 = require("../infrastructure/persistence/prisma/prisma-channel.repository");
+const prisma_event_store_1 = require("../infrastructure/persistence/prisma/prisma-event.store");
+const prisma_identity_repository_1 = require("../infrastructure/persistence/prisma/prisma-identity.repository");
 // ── Services ─────────────────────────────────────────────────
-const identityRepo = new identity_repository_1.IdentityRepository();
+const identityRepo = new prisma_identity_repository_1.PrismaIdentityRepository();
 const identityService = new identity_service_1.IdentityService(identityRepo);
+const channelRepository = new prisma_channel_repository_1.PrismaChannelRepository();
+const eventStore = new prisma_event_store_1.PrismaEventStore();
+const eventService = new event_service_1.EventService(eventStore);
+let peerService = null;
+let gossipService = null;
+const P2P_ENABLED = (process.env.ZIP_P2P_ENABLED ?? 'true').toLowerCase() !== 'false';
+const P2P_HOST = process.env.ZIP_P2P_HOST ?? '0.0.0.0';
+const P2P_PORT = parsePort(process.env.ZIP_P2P_PORT, 7070);
+const P2P_SEEDS = parsePeerSeeds(process.env.ZIP_P2P_SEEDS ?? process.env.ZIP_P2P_SEED);
+const P2P_NODE_ID = process.env.ZIP_P2P_NODE_ID?.trim();
 // ── IPC Helpers ───────────────────────────────────────────────
 function initials(username) {
     return username
@@ -26,15 +45,172 @@ function formatTime(timestamp) {
         minute: '2-digit',
     });
 }
+function normalizePublicKey(value) {
+    if (typeof value === 'string') {
+        const normalized = value.trim();
+        if (/^[0-9a-fA-F]{64}$/.test(normalized)) {
+            return normalized.toLowerCase();
+        }
+        if (/^\d+(,\d+){31}$/.test(normalized)) {
+            const bytes = normalized
+                .split(',')
+                .map((v) => Number.parseInt(v, 10));
+            return Buffer.from(bytes).toString('hex');
+        }
+        return normalized;
+    }
+    if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+        return Buffer.from(value).toString('hex');
+    }
+    return String(value);
+}
+function emitUIEventUpdate(event, source) {
+    const payload = {
+        id: event.id,
+        channelId: event.channelId,
+        type: event.type,
+        source,
+        timestamp: event.timestamp,
+    };
+    for (const win of electron_1.BrowserWindow.getAllWindows()) {
+        win.webContents.send('events:changed', payload);
+    }
+}
+function getP2PStatus() {
+    return {
+        enabled: P2P_ENABLED,
+        connected: peerService !== null && gossipService !== null,
+        peers: peerService?.peers().length ?? 0,
+        host: P2P_HOST,
+        port: P2P_PORT,
+    };
+}
+function emitP2PStatus() {
+    const status = getP2PStatus();
+    for (const win of electron_1.BrowserWindow.getAllWindows()) {
+        win.webContents.send('p2p:status-changed', status);
+    }
+}
+function parsePort(rawPort, fallback) {
+    if (!rawPort) {
+        return fallback;
+    }
+    const parsed = Number.parseInt(rawPort, 10);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+        return fallback;
+    }
+    return parsed;
+}
+function parsePeerSeeds(rawSeeds) {
+    if (!rawSeeds) {
+        return [];
+    }
+    const parsed = [];
+    for (const token of rawSeeds.split(',')) {
+        const value = token.trim();
+        if (value.length === 0) {
+            continue;
+        }
+        const separator = value.lastIndexOf(':');
+        if (separator <= 0 || separator === value.length - 1) {
+            continue;
+        }
+        const host = value.slice(0, separator).trim();
+        const portValue = Number.parseInt(value.slice(separator + 1), 10);
+        if (!host || !Number.isInteger(portValue) || portValue < 1 || portValue > 65535) {
+            continue;
+        }
+        parsed.push({ host, port: portValue });
+    }
+    return parsed;
+}
+function isSameHost(a, b) {
+    const normalize = (value) => {
+        const cleaned = value
+            .replace('::ffff:', '')
+            .replace('[', '')
+            .replace(']', '')
+            .trim()
+            .toLowerCase();
+        if (cleaned === 'localhost' || cleaned === '::1') {
+            return '127.0.0.1';
+        }
+        return cleaned;
+    };
+    return normalize(a) === normalize(b);
+}
+async function startP2P() {
+    if (!P2P_ENABLED || peerService || gossipService) {
+        return;
+    }
+    const identity = await identityService.loadLocalIdentity();
+    const nodeId = P2P_NODE_ID && P2P_NODE_ID.length > 0
+        ? P2P_NODE_ID
+        : (identity ? normalizePublicKey(identity.publicKey) : (0, node_crypto_1.randomUUID)());
+    const seeds = P2P_SEEDS.filter((seed) => !(seed.port === P2P_PORT && isSameHost(seed.host, P2P_HOST)));
+    const transport = new transport_1.P2PTransport({
+        nodeId,
+        host: P2P_HOST,
+        port: P2P_PORT,
+    });
+    transport.on('warning', ({ error }) => {
+        const details = error instanceof Error ? error.message : String(error);
+        console.warn(`[p2p] warning: ${details}`);
+    });
+    transport.on('peer:connected', ({ nodeId: remoteNodeId, remote }) => {
+        console.info(`[p2p] peer connected ${remoteNodeId ?? 'unknown'} (${remote.host}:${remote.port})`);
+        emitP2PStatus();
+    });
+    transport.on('peer:disconnected', ({ nodeId: remoteNodeId, remote }) => {
+        console.info(`[p2p] peer disconnected ${remoteNodeId ?? 'unknown'} (${remote.host}:${remote.port})`);
+        emitP2PStatus();
+    });
+    peerService = new peer_service_1.PeerService(transport, { seeds });
+    gossipService = new gossip_service_1.GossipService(transport, eventService, {
+        onEventIngested: async (event) => {
+            if (event.type === 'channel.create') {
+                await channelRepository.createIfMissing({
+                    id: event.channelId,
+                    creator: event.author,
+                    createdAt: event.timestamp,
+                });
+            }
+            emitUIEventUpdate(event, 'remote');
+        },
+        logger: console,
+    });
+    gossipService.start();
+    try {
+        await peerService.start();
+        console.info(`[p2p] listening on ${P2P_HOST}:${P2P_PORT} with ${seeds.length} seed(s)`);
+        emitP2PStatus();
+    }
+    catch (error) {
+        gossipService.stop();
+        gossipService = null;
+        peerService = null;
+        emitP2PStatus();
+        throw error;
+    }
+}
+async function stopP2P() {
+    if (gossipService) {
+        gossipService.stop();
+        gossipService = null;
+    }
+    if (peerService) {
+        await peerService.stop();
+        peerService = null;
+    }
+    emitP2PStatus();
+}
 // ── IPC Handlers ──────────────────────────────────────────────
 electron_1.ipcMain.handle('identity:get', async () => {
     const identity = await identityService.loadLocalIdentity();
-    if (!identity || typeof identity === 'string')
+    if (!identity)
         return null;
     return {
-        publicKey: Buffer.isBuffer(identity.publicKey)
-            ? identity.publicKey.toString('hex')
-            : String(identity.publicKey),
+        publicKey: normalizePublicKey(identity.publicKey),
         username: identity.username,
         avatar: initials(identity.username),
     };
@@ -42,30 +218,34 @@ electron_1.ipcMain.handle('identity:get', async () => {
 electron_1.ipcMain.handle('identity:create', async (_event, username) => {
     const identity = await identityService.createLocalIdentity(username, null);
     return {
-        publicKey: Buffer.isBuffer(identity.publicKey)
-            ? identity.publicKey.toString('hex')
-            : String(identity.publicKey),
+        publicKey: normalizePublicKey(identity.publicKey),
         username: identity.username,
         avatar: initials(identity.username),
     };
 });
 electron_1.ipcMain.handle('channel:list', async () => {
-    const channels = await prisma_client_1.prisma.channel.findMany({ orderBy: { createdAt: 'asc' } });
+    const channels = await channelRepository.list();
     const result = [];
     for (const ch of channels) {
-        // Count members via member.join events
-        const memberCount = await prisma_client_1.prisma.event.count({
-            where: { channelId: ch.id, type: 'member.join' },
+        const events = await eventService.listByChannel(ch.id, {
+            types: ['member.join', 'message.create'],
         });
-        // Get last message
-        const last = await prisma_client_1.prisma.event.findFirst({
-            where: { channelId: ch.id, type: 'message.create' },
-            orderBy: { timestamp: 'desc' },
-        });
+        let memberCount = 0;
         let lastMessage;
-        if (last) {
-            const payload = JSON.parse(last.payload.toString());
-            lastMessage = payload.content;
+        for (const event of events) {
+            if (event.type === 'member.join') {
+                memberCount += 1;
+                continue;
+            }
+            if (event.type === 'message.create') {
+                try {
+                    const payload = event_serializer_1.EventSerializer.decodePayload(event.payload);
+                    lastMessage = payload.content;
+                }
+                catch {
+                    // Ignore malformed payload and keep listing.
+                }
+            }
         }
         result.push({
             id: ch.id,
@@ -79,47 +259,34 @@ electron_1.ipcMain.handle('channel:list', async () => {
 });
 electron_1.ipcMain.handle('channel:create', async (_event, name, description) => {
     const identity = await identityService.loadLocalIdentity();
-    if (!identity || typeof identity === 'string')
+    if (!identity)
         throw new Error('No identity');
-    const publicKeyHex = Buffer.isBuffer(identity.publicKey)
-        ? identity.publicKey.toString('hex')
-        : String(identity.publicKey);
+    const publicKeyHex = normalizePublicKey(identity.publicKey);
+    const privateKey = await identityService.getLocalPrivateKey();
     const channelId = name.toLowerCase().replace(/\s+/g, '-');
-    // Persist channel
-    await prisma_client_1.prisma.channel.upsert({
-        where: { id: channelId },
-        update: {},
-        create: { id: channelId, creator: publicKeyHex, createdAt: Date.now() },
+    await channelRepository.createIfMissing({
+        id: channelId,
+        creator: publicKeyHex,
+        createdAt: Date.now(),
     });
-    // Emit channel.create event
-    const payload = JSON.stringify({ name, description: description ?? '' });
-    const eventId = `${channelId}-create-${Date.now()}`;
-    await prisma_client_1.prisma.event.create({
-        data: {
-            id: eventId,
-            channelId,
-            author: publicKeyHex,
-            timestamp: Date.now(),
-            type: 'channel.create',
-            payload: Buffer.from(payload),
-            prev: JSON.stringify([]),
-            signature: '',
-        },
+    const channelCreated = await eventService.publish({
+        channelId,
+        author: publicKeyHex,
+        type: 'channel.create',
+        payload: { name, description: description ?? '' },
+        privateKey,
     });
-    // Emit member.join for creator
-    const joinEventId = `${channelId}-join-${publicKeyHex.slice(0, 8)}-${Date.now()}`;
-    await prisma_client_1.prisma.event.create({
-        data: {
-            id: joinEventId,
-            channelId,
-            author: publicKeyHex,
-            timestamp: Date.now() + 1,
-            type: 'member.join',
-            payload: Buffer.from(JSON.stringify({ member: publicKeyHex })),
-            prev: JSON.stringify([eventId]),
-            signature: '',
-        },
+    emitUIEventUpdate(channelCreated, 'local');
+    gossipService?.broadcastEvent(channelCreated);
+    const memberJoined = await eventService.publish({
+        channelId,
+        author: publicKeyHex,
+        type: 'member.join',
+        payload: { member: publicKeyHex },
+        privateKey,
     });
+    emitUIEventUpdate(memberJoined, 'local');
+    gossipService?.broadcastEvent(memberJoined);
     return {
         id: channelId,
         name,
@@ -130,20 +297,21 @@ electron_1.ipcMain.handle('channel:create', async (_event, name, description) =>
 });
 electron_1.ipcMain.handle('message:list', async (_event, channelId) => {
     const identity = await identityService.loadLocalIdentity();
-    const myKey = identity && typeof identity !== 'string'
-        ? (Buffer.isBuffer(identity.publicKey)
-            ? identity.publicKey.toString('hex')
-            : String(identity.publicKey))
-        : null;
-    const events = await prisma_client_1.prisma.event.findMany({
-        where: { channelId, type: { in: ['message.create', 'message.edit', 'message.delete'] } },
-        orderBy: { timestamp: 'asc' },
+    const myKey = identity ? normalizePublicKey(identity.publicKey) : null;
+    const events = await eventService.listByChannel(channelId, {
+        types: ['message.create', 'message.edit', 'message.delete'],
     });
     // Build derived messages from events
     const messages = new Map();
     for (const ev of events) {
-        const payload = JSON.parse(ev.payload.toString());
         if (ev.type === 'message.create') {
+            let payload;
+            try {
+                payload = event_serializer_1.EventSerializer.decodePayload(ev.payload);
+            }
+            catch {
+                continue;
+            }
             // Look up username for author
             const authorId = await prisma_client_1.prisma.identity.findUnique({ where: { publicKey: ev.author } });
             const authorName = authorId?.username ?? ev.author.slice(0, 8) + '…';
@@ -159,12 +327,26 @@ electron_1.ipcMain.handle('message:list', async (_event, channelId) => {
             });
         }
         else if (ev.type === 'message.edit') {
+            let payload;
+            try {
+                payload = event_serializer_1.EventSerializer.decodePayload(ev.payload);
+            }
+            catch {
+                continue;
+            }
             const target = messages.get(payload.targetEventId);
             if (target) {
                 messages.set(target.id, { ...target, content: payload.newContent, edited: true });
             }
         }
         else if (ev.type === 'message.delete') {
+            let payload;
+            try {
+                payload = event_serializer_1.EventSerializer.decodePayload(ev.payload);
+            }
+            catch {
+                continue;
+            }
             const target = messages.get(payload.targetEventId);
             if (target) {
                 messages.set(target.id, { ...target, content: '[mensagem apagada]', deleted: true });
@@ -175,24 +357,35 @@ electron_1.ipcMain.handle('message:list', async (_event, channelId) => {
 });
 electron_1.ipcMain.handle('message:send', async (_event, channelId, content) => {
     const identity = await identityService.loadLocalIdentity();
-    if (!identity || typeof identity === 'string')
+    if (!identity)
         throw new Error('No identity');
-    const publicKeyHex = Buffer.isBuffer(identity.publicKey)
-        ? identity.publicKey.toString('hex')
-        : String(identity.publicKey);
-    const eventId = `msg-${channelId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    await prisma_client_1.prisma.event.create({
-        data: {
-            id: eventId,
-            channelId,
-            author: publicKeyHex,
-            timestamp: Date.now(),
-            type: 'message.create',
-            payload: Buffer.from(JSON.stringify({ content })),
-            prev: JSON.stringify([]),
-            signature: '',
-        },
+    const publicKeyHex = normalizePublicKey(identity.publicKey);
+    const privateKey = await identityService.getLocalPrivateKey();
+    const messageCreated = await eventService.publish({
+        channelId,
+        author: publicKeyHex,
+        type: 'message.create',
+        payload: { content },
+        privateKey,
     });
+    emitUIEventUpdate(messageCreated, 'local');
+    gossipService?.broadcastEvent(messageCreated);
+});
+electron_1.ipcMain.handle('p2p:status', async () => {
+    return getP2PStatus();
+});
+electron_1.ipcMain.handle('p2p:connect', async () => {
+    try {
+        await startP2P();
+    }
+    catch (error) {
+        console.warn(`[p2p] connect failed: ${error.message}`);
+    }
+    return getP2PStatus();
+});
+electron_1.ipcMain.handle('p2p:disconnect', async () => {
+    await stopP2P();
+    return getP2PStatus();
 });
 // ── Window ────────────────────────────────────────────────────
 function createWindow() {
@@ -223,4 +416,7 @@ electron_1.app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         electron_1.app.quit();
     }
+});
+electron_1.app.on('before-quit', () => {
+    void stopP2P();
 });

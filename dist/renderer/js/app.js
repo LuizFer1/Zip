@@ -1,316 +1,192 @@
 "use strict";
-// ── Type Declarations (mirrored from model.ts for browser context) ─────────
-// Access the bridge through a typed accessor to avoid
-// TypeScript's strict Window augmentation requirement
 const zipApi = () => window.zip;
+const DEFAULT_CHANNEL = 'geral';
 const state = {
     profile: null,
-    channels: [],
-    activeChannelId: null,
+    p2p: null,
+    channelId: DEFAULT_CHANNEL,
     messages: [],
 };
-// ── UI Helpers ───────────────────────────────────────────────
-function getEl(id) {
-    const el = document.getElementById(id);
-    if (!el)
-        throw new Error(`Element #${id} not found`);
-    return el;
-}
 const ui = {
-    homeButton: getEl('home-button'),
-    openCreateChannel: getEl('open-create-channel'),
-    createChannelInline: getEl('create-channel-inline'),
-    channelList: getEl('channel-list'),
-    channelCount: getEl('channel-count'),
-    chatContext: getEl('chat-context'),
-    chatTitle: getEl('chat-title'),
-    chatSubtitle: getEl('chat-subtitle'),
+    profileLabel: getEl('profile-label'),
+    connectionStatus: getEl('connection-status'),
+    connectButton: getEl('connect-button'),
+    disconnectButton: getEl('disconnect-button'),
+    identityPanel: getEl('identity-panel'),
+    identityForm: getEl('identity-form'),
+    identityInput: getEl('identity-input'),
+    channelIdInput: getEl('channel-id'),
     messageList: getEl('message-list'),
     messageForm: getEl('message-form'),
     messageInput: getEl('message-input'),
-    sendButton: getEl('message-form') // resolved via form submit
-        .querySelector('.send-button'),
-    participantList: getEl('participant-list'),
-    participantCount: getEl('participant-count'),
-    participantsTitle: getEl('participants-title'),
-    profileAvatar: getEl('profile-avatar'),
-    profileName: getEl('profile-name'),
-    profileHandle: getEl('profile-handle'),
-    profileStatus: getEl('profile-status'),
-    railProfileAvatar: getEl('profile-trigger'),
-    // Onboarding
-    onboardingDialog: getEl('onboarding-dialog'),
-    onboardingForm: getEl('onboarding-form'),
-    onboardingUsername: getEl('onboarding-username'),
-    // Create channel
-    createChannelDialog: getEl('create-channel-dialog'),
-    createChannelForm: getEl('create-channel-form'),
-    cancelCreateChannel: getEl('cancel-create-channel'),
-    channelName: getEl('channel-name'),
-    channelDescription: getEl('channel-description'),
+    sendButton: getEl('send-button'),
 };
-// ── Render Functions ─────────────────────────────────────────
-function renderProfile() {
-    if (!state.profile)
-        return;
-    const { username, avatar } = state.profile;
-    const handle = '@' + username.toLowerCase().replace(/\s+/g, '');
-    ui.profileAvatar.textContent = avatar;
-    ui.profileName.textContent = username;
-    ui.profileHandle.textContent = handle;
-    ui.railProfileAvatar.textContent = avatar;
-}
-function renderChannels() {
-    ui.channelCount.textContent = String(state.channels.length);
-    if (state.channels.length === 0) {
-        ui.channelList.innerHTML = `
-      <li class="empty-list-hint">
-        Nenhum canal ainda.<br>Crie um para começar.
-      </li>
-    `;
-        return;
+function getEl(id) {
+    const el = document.getElementById(id);
+    if (!el) {
+        throw new Error(`Element #${id} not found`);
     }
-    ui.channelList.innerHTML = state.channels
-        .map((ch) => {
-        const isActive = ch.id === state.activeChannelId;
-        const preview = ch.lastMessage
-            ? ch.lastMessage.slice(0, 40) + (ch.lastMessage.length > 40 ? '…' : '')
-            : 'Sem mensagens';
-        return `
-        <li>
-          <button class="entity-item ${isActive ? 'active' : ''}" type="button" data-channel-id="${ch.id}">
-            <span class="avatar">#</span>
-            <span class="entity-meta">
-              <span class="entity-name">${escapeHtml(ch.name)}</span>
-              <span class="entity-subtitle">${escapeHtml(preview)}</span>
-            </span>
-            <span class="entity-status"></span>
-          </button>
-        </li>
-      `;
-    })
-        .join('');
+    return el;
 }
-function renderChat() {
-    const channel = state.channels.find((c) => c.id === state.activeChannelId);
-    if (!channel) {
-        ui.chatTitle.textContent = 'Zip Chat';
-        ui.chatSubtitle.textContent = 'Selecione um canal para começar';
-        ui.chatContext.textContent = '';
-        ui.messageList.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">
-          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"
-            stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-        </div>
-        <p class="empty-title">Nenhum canal selecionado</p>
-        <p class="empty-sub">Selecione um canal ou crie um novo para começar a conversar.</p>
-      </div>
-    `;
-        setInputEnabled(false);
-        return;
-    }
-    ui.chatContext.textContent = 'canal';
-    ui.chatTitle.textContent = `#${channel.name}`;
-    ui.chatSubtitle.textContent = channel.description || `${channel.memberCount} membro(s)`;
-    setInputEnabled(true);
-    if (state.messages.length === 0) {
-        ui.messageList.innerHTML = `
-      <div class="empty-state">
-        <p class="empty-title">Nenhuma mensagem ainda</p>
-        <p class="empty-sub">Seja o primeiro a escrever algo em #${escapeHtml(channel.name)}.</p>
-      </div>
-    `;
-        return;
-    }
-    ui.messageList.innerHTML = state.messages
-        .filter((m) => !m.deleted)
-        .map((m) => `
-      <article class="message ${m.own ? 'own' : ''}">
-        <header class="message-head">
-          <span class="avatar">${m.author.slice(0, 2).toUpperCase()}</span>
-          <span class="message-author">${escapeHtml(m.author)}${m.edited ? ' <em class="edited-tag">(editado)</em>' : ''}</span>
-          <span class="message-time">${m.time}</span>
-        </header>
-        <div class="message-bubble">${escapeHtml(m.content)}</div>
-      </article>
-    `)
-        .join('');
-    ui.messageList.scrollTop = ui.messageList.scrollHeight;
-}
-function renderParticipants() {
-    const channel = state.channels.find((c) => c.id === state.activeChannelId);
-    if (!channel) {
-        ui.participantCount.textContent = '0';
-        ui.participantList.innerHTML = '';
-        return;
-    }
-    ui.participantsTitle.textContent = 'Membros do canal';
-    ui.participantCount.textContent = String(channel.memberCount);
-    // We don't have full member list from message listing,
-    // so show a summary row with member count
-    const myProfile = state.profile;
-    ui.participantList.innerHTML = myProfile
-        ? `
-    <li class="participant-item">
-      <span class="avatar">${escapeHtml(myProfile.avatar)}</span>
-      <span>
-        <span class="entity-name">${escapeHtml(myProfile.username)}</span>
-        <span class="participant-role">você</span>
-      </span>
-      <span class="entity-status"></span>
-    </li>
-  `
-        : '';
-}
-function render() {
-    renderProfile();
-    renderChannels();
-    renderChat();
-    renderParticipants();
-}
-// ── Utilities ────────────────────────────────────────────────
-function escapeHtml(str) {
-    return str
+function escapeHtml(value) {
+    return value
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 }
-function setInputEnabled(enabled) {
-    ui.messageInput.disabled = !enabled;
-    ui.messageInput.placeholder = enabled
-        ? 'Escreva uma mensagem…'
-        : 'Selecione um canal para enviar mensagens…';
-    const sendBtn = ui.messageForm.querySelector('.send-button');
-    if (sendBtn)
-        sendBtn.disabled = !enabled;
-}
-// ── Actions ──────────────────────────────────────────────────
-async function activateChannel(channelId) {
-    state.activeChannelId = channelId;
-    renderChannels();
-    renderChat();
-    renderParticipants();
-    try {
-        state.messages = await zipApi().listMessages(channelId);
-        renderChat();
-    }
-    catch (err) {
-        console.error('Failed to load messages:', err);
-    }
-}
-function openCreateChannelDialog() {
-    if (typeof ui.createChannelDialog.showModal === 'function') {
-        ui.createChannelDialog.showModal();
-    }
-}
-function closeCreateChannelDialog() {
-    if (ui.createChannelDialog.open) {
-        ui.createChannelDialog.close();
-    }
-}
-// ── Event Listeners ──────────────────────────────────────────
-ui.openCreateChannel.addEventListener('click', openCreateChannelDialog);
-ui.createChannelInline.addEventListener('click', openCreateChannelDialog);
-ui.cancelCreateChannel.addEventListener('click', closeCreateChannelDialog);
-ui.channelList.addEventListener('click', (event) => {
-    const button = event.target.closest('button[data-channel-id]');
-    if (!button?.dataset.channelId)
+function renderProfile() {
+    if (!state.profile) {
+        ui.profileLabel.textContent = 'Sem identidade';
+        ui.identityPanel.style.display = 'block';
+        ui.messageInput.disabled = true;
+        ui.sendButton.disabled = true;
         return;
-    activateChannel(button.dataset.channelId);
-});
-ui.homeButton.addEventListener('click', () => {
-    if (state.channels.length > 0 && !state.activeChannelId) {
-        activateChannel(state.channels[0].id);
     }
+    ui.profileLabel.textContent = `${state.profile.username} (${state.profile.publicKey.slice(0, 8)}...)`;
+    ui.identityPanel.style.display = 'none';
+    ui.messageInput.disabled = false;
+    ui.sendButton.disabled = false;
+}
+function renderP2PStatus() {
+    const status = state.p2p;
+    if (!status || !status.enabled || !status.connected) {
+        ui.connectionStatus.textContent = 'Desconectado';
+        ui.connectionStatus.className = 'status-badge offline';
+        ui.connectButton.disabled = false;
+        ui.disconnectButton.disabled = true;
+        return;
+    }
+    ui.connectionStatus.textContent = `Conectado (${status.peers} peers)`;
+    ui.connectionStatus.className = 'status-badge online';
+    ui.connectButton.disabled = true;
+    ui.disconnectButton.disabled = false;
+}
+function renderMessages() {
+    const visibleMessages = state.messages.filter((message) => !message.deleted);
+    if (!state.profile) {
+        ui.messageList.innerHTML = '<p class="placeholder">Crie sua identidade para começar.</p>';
+        return;
+    }
+    if (visibleMessages.length === 0) {
+        ui.messageList.innerHTML = '<p class="placeholder">Nenhuma mensagem ainda.</p>';
+        return;
+    }
+    ui.messageList.innerHTML = visibleMessages
+        .map((message) => `
+      <article class="message ${message.own ? 'own' : ''}">
+        <div class="message-meta">${escapeHtml(message.author)} • ${escapeHtml(message.time)}</div>
+        <div>${escapeHtml(message.content)}</div>
+      </article>
+    `)
+        .join('');
+    ui.messageList.scrollTop = ui.messageList.scrollHeight;
+}
+async function ensureDefaultChannel() {
+    if (!state.profile) {
+        return;
+    }
+    const channels = await zipApi().listChannels();
+    const exists = channels.some((channel) => channel.id === state.channelId);
+    if (!exists) {
+        await zipApi().createChannel(state.channelId, 'Canal padrão');
+    }
+}
+async function loadMessages() {
+    if (!state.profile) {
+        state.messages = [];
+        renderMessages();
+        return;
+    }
+    try {
+        await ensureDefaultChannel();
+        state.messages = await zipApi().listMessages(state.channelId);
+        renderMessages();
+    }
+    catch (error) {
+        console.error('Failed to load messages:', error);
+    }
+}
+async function connectP2P() {
+    try {
+        state.p2p = await zipApi().connectP2P();
+        renderP2PStatus();
+    }
+    catch (error) {
+        console.error('Failed to connect P2P:', error);
+    }
+}
+async function disconnectP2P() {
+    try {
+        state.p2p = await zipApi().disconnectP2P();
+        renderP2PStatus();
+    }
+    catch (error) {
+        console.error('Failed to disconnect P2P:', error);
+    }
+}
+ui.connectButton.addEventListener('click', () => {
+    void connectP2P();
 });
-ui.createChannelForm.addEventListener('submit', async (event) => {
+ui.disconnectButton.addEventListener('click', () => {
+    void disconnectP2P();
+});
+ui.identityForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const name = ui.channelName.value.trim().toLowerCase().replace(/\s+/g, '-');
-    const description = ui.channelDescription.value.trim();
-    if (!name)
+    const username = ui.identityInput.value.trim();
+    if (!username) {
         return;
-    try {
-        const newChannel = await zipApi().createChannel(name, description);
-        state.channels.unshift(newChannel);
-        ui.createChannelForm.reset();
-        closeCreateChannelDialog();
-        await activateChannel(newChannel.id);
     }
-    catch (err) {
-        console.error('Failed to create channel:', err);
+    try {
+        state.profile = await zipApi().createIdentity(username);
+        ui.identityInput.value = '';
+        renderProfile();
+        await ensureDefaultChannel();
+        await loadMessages();
+    }
+    catch (error) {
+        console.error('Failed to create identity:', error);
     }
 });
 ui.messageForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (!state.profile) {
+        return;
+    }
     const content = ui.messageInput.value.trim();
-    if (!content || !state.activeChannelId)
+    if (!content) {
         return;
+    }
     ui.messageInput.value = '';
-    ui.messageInput.disabled = true;
     try {
-        await zipApi().sendMessage(state.activeChannelId, content);
-        // Reload messages to display the sent one
-        state.messages = await zipApi().listMessages(state.activeChannelId);
-        // Update last message preview in channel list
-        const ch = state.channels.find((c) => c.id === state.activeChannelId);
-        if (ch)
-            ch.lastMessage = content;
-        renderChannels();
-        renderChat();
+        await ensureDefaultChannel();
+        await zipApi().sendMessage(state.channelId, content);
+        await loadMessages();
     }
-    catch (err) {
-        console.error('Failed to send message:', err);
-    }
-    finally {
-        ui.messageInput.disabled = false;
-        ui.messageInput.focus();
+    catch (error) {
+        console.error('Failed to send message:', error);
     }
 });
-document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape')
-        closeCreateChannelDialog();
-});
-// ── Onboarding ───────────────────────────────────────────────
-ui.onboardingForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const username = ui.onboardingUsername.value.trim();
-    if (!username)
-        return;
-    try {
-        state.profile = await zipApi().createIdentity(username);
-        ui.onboardingDialog.close();
-        render();
-    }
-    catch (err) {
-        console.error('Failed to create identity:', err);
-    }
-});
-// ── Init ─────────────────────────────────────────────────────
 async function init() {
+    ui.channelIdInput.value = state.channelId;
+    zipApi().onEventsChanged((update) => {
+        if (update.channelId === state.channelId) {
+            void loadMessages();
+        }
+    });
+    zipApi().onP2PStatusChanged((status) => {
+        state.p2p = status;
+        renderP2PStatus();
+    });
     try {
-        // Load identity
         state.profile = await zipApi().getIdentity();
-        if (!state.profile) {
-            // First run — show onboarding
-            if (typeof ui.onboardingDialog.showModal === 'function') {
-                ui.onboardingDialog.showModal();
-            }
-            return;
-        }
-        // Load channels
-        state.channels = await zipApi().listChannels();
-        render();
-        // Auto-open first channel
-        if (state.channels.length > 0) {
-            await activateChannel(state.channels[0].id);
-        }
+        state.p2p = await zipApi().getP2PStatus();
     }
-    catch (err) {
-        console.error('Init failed:', err);
+    catch (error) {
+        console.error('Failed to bootstrap app:', error);
     }
+    renderProfile();
+    renderP2PStatus();
+    await loadMessages();
 }
-init();
+void init();

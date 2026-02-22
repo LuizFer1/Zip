@@ -14,9 +14,7 @@ class EventService {
     async publish(input) {
         const prev = input.prev ?? await this.resolvePrevRef(input.channelId);
         const event = event_factory_1.EventFactory.create(input.channelId, input.author, input.type, input.payload, prev, '');
-        if (input.privateKey) {
-            event.signature = this.signer.sign(event, input.privateKey);
-        }
+        event.signature = this.signer.sign(event, input.privateKey);
         await this.store.append(event);
         return event;
     }
