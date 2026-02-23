@@ -37,6 +37,9 @@ class IdentityService {
     async getIdentity(publicKey) {
         return this.repository.getIdentity(publicKey);
     }
+    async createOrUpdateIdentity(identity) {
+        return this.repository.createOrUpdateIdentity(identity);
+    }
     async getAllIdentities() {
         return this.repository.getAllIdentities();
     }

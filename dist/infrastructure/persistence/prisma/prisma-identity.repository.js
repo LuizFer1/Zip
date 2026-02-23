@@ -45,5 +45,22 @@ class PrismaIdentityRepository {
         const data = await this.db.identity.findMany();
         return data.map((row) => identity_mapper_1.IdentityMapper.identityToDomain(row));
     }
+    async createOrUpdateIdentity(identity) {
+        const data = await this.db.identity.upsert({
+            where: { publicKey: identity.publicKey },
+            update: {
+                username: identity.username,
+                avatar: identity.avatar ?? null,
+                updatedAt: Date.now(),
+            },
+            create: {
+                publicKey: identity.publicKey,
+                username: identity.username,
+                avatar: identity.avatar ?? null,
+                updatedAt: Date.now(),
+            },
+        });
+        return identity_mapper_1.IdentityMapper.identityToDomain(data);
+    }
 }
 exports.PrismaIdentityRepository = PrismaIdentityRepository;

@@ -59,6 +59,10 @@ export class IdentityService {
     return this.repository.getIdentity(publicKey);
   }
 
+  async createOrUpdateIdentity(identity: Identity): Promise<Identity> {
+    return this.repository.createOrUpdateIdentity(identity);
+  }
+
   async getAllIdentities(): Promise<Identity[]> {
     return this.repository.getAllIdentities();
   }

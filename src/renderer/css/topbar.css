@@ -1,0 +1,104 @@
+.topbar {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 420px) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(115deg, var(--surface), var(--surface-strong));
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-soft);
+}
+
+.topbar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar__logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background:
+    linear-gradient(160deg, var(--warning), #ffd47b);
+  display: grid;
+  place-items: center;
+  color: #3a2b10;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.topbar__title {
+  display: grid;
+  gap: 2px;
+}
+
+.topbar__title h1 {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.topbar__title p {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.topbar__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 10px 14px;
+}
+
+.topbar__search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.topbar__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.topbar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 9px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.topbar__button {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  padding: 10px 14px;
+}
+
+@media (max-width: 980px) {
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar__actions {
+    justify-content: flex-start;
+  }
+}

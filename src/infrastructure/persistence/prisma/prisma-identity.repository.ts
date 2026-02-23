@@ -50,4 +50,23 @@ export class PrismaIdentityRepository implements IdentityRepository {
     const data = await this.db.identity.findMany();
     return data.map((row) => IdentityMapper.identityToDomain(row));
   }
+
+  async createOrUpdateIdentity(identity: Identity): Promise<Identity> {
+    const data = await this.db.identity.upsert({
+      where: { publicKey: identity.publicKey },
+      update: {
+        username: identity.username,
+        avatar: identity.avatar ?? null,
+        updatedAt: Date.now(),
+      },
+      create: {
+        publicKey: identity.publicKey,
+        username: identity.username,
+        avatar: identity.avatar ?? null,
+        updatedAt: Date.now(),
+      },
+    });
+
+    return IdentityMapper.identityToDomain(data);
+  }
 }

@@ -1,0 +1,88 @@
+:root {
+  --font-display: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "Cascadia Code", monospace;
+
+  /* Light palette – refined warm-neutral */
+  --bg-base: #eeeae0;
+  --bg-gradient-a: #f9f5ea;
+  --bg-gradient-b: #e6f0eb;
+  --surface: #fdfbf5;
+  --surface-strong: #f7f1e4;
+  --surface-muted: #ede8db;
+  --line: #d4cab8;
+
+  --text: #18201c;
+  --text-muted: #5e6960;
+  --text-inverse: #ffffff;
+
+  --accent: #1a8b72;
+  --accent-soft: #d4ede7;
+  --accent-strong: #0b6b58;
+  --accent-hover: #157a62;
+
+  --warning: #e88a2e;
+  --warning-soft: #fdecd7;
+
+  --danger: #d04040;
+  --danger-soft: #fde8e8;
+
+  /* Radii */
+  --radius-xl: 24px;
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+
+  /* Shadows */
+  --shadow-soft: 0 14px 40px rgba(24, 32, 28, 0.08);
+  --shadow-card: 0 4px 12px rgba(24, 32, 28, 0.06);
+  --shadow-modal: 0 24px 60px rgba(24, 32, 28, 0.18);
+
+  /* Layout */
+  --topbar-height: 68px;
+  --left-sidebar-width: 80px;
+  --left-mainbar-width: 280px;
+  --right-sidebar-width: 268px;
+
+  /* Transitions */
+  --transition-fast: 120ms ease;
+  --transition-mid: 220ms ease;
+  --transition-slow: 360ms ease;
+
+  /* Modal */
+  --modal-backdrop: rgba(18, 22, 20, 0.55);
+  --modal-bg: var(--surface);
+}
+
+[data-theme="dark"] {
+  --bg-base: #0e1214;
+  --bg-gradient-a: #172220;
+  --bg-gradient-b: #141c29;
+  --surface: #181e24;
+  --surface-strong: #1e2832;
+  --surface-muted: #131820;
+  --line: #283040;
+
+  --text: #dde7f0;
+  --text-muted: #8aa4bc;
+  --text-inverse: #ffffff;
+
+  --accent: #27b399;
+  --accent-soft: #122f2b;
+  --accent-strong: #7ddece;
+  --accent-hover: #32c4a8;
+
+  --warning: #f0ab44;
+  --warning-soft: #2e1f08;
+
+  --danger: #e05555;
+  --danger-soft: #2a1212;
+
+  --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.40);
+  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.30);
+  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.60);
+
+  --modal-backdrop: rgba(8, 12, 10, 0.72);
+  --modal-bg: var(--surface-strong);
+}

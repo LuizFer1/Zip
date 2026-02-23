@@ -178,6 +178,24 @@ export interface UIMessage {
   deleted: boolean;
 }
 
+export interface UIContact {
+  nodeId: string;
+  publicKey: string;
+  username: string;
+  avatar: string;
+  connected: boolean;
+}
+
+export interface UIInvite {
+  id: string;
+  channelId: string;
+  channelName: string;
+  fromNodeId: string;
+  fromPublicKey: string;
+  fromUsername: string;
+  createdAt: number;
+}
+
 export interface UIEventUpdate {
   id: string;
   channelId: string;
@@ -215,8 +233,15 @@ export interface ZipAPI {
   connectP2P(): Promise<UIP2PStatus>;
   disconnectP2P(): Promise<UIP2PStatus>;
   getP2PStatus(): Promise<UIP2PStatus>;
+  listContacts(): Promise<UIContact[]>;
+  startDirectChat(nodeId: string): Promise<UIChannel>;
+  invitePeerToChannel(channelId: string, nodeId: string): Promise<void>;
+  listInvites(): Promise<UIInvite[]>;
+  respondInvite(inviteId: string, accept: boolean): Promise<void>;
   onEventsChanged(listener: (update: UIEventUpdate) => void): () => void;
   onP2PStatusChanged(listener: (status: UIP2PStatus) => void): () => void;
+  onContactsChanged(listener: (contacts: UIContact[]) => void): () => void;
+  onInvitesChanged(listener: (invites: UIInvite[]) => void): () => void;
 }
 
 // ─────────────────────────────────────────────

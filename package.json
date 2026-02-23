@@ -5,33 +5,39 @@
   "main": "dist/main/main.js",
   "license": "AGPL-3.0-or-later",
   "scripts": {
-    "build": "tsc",
-    "start": "tsc && electron .",
+    "build:main": "tsc",
+    "build:renderer": "vite build --config vite.renderer.config.mjs",
+    "build": "npm run build:main && npm run build:renderer",
+    "start": "npm run build && electron .",
     "dev": "tsc --watch",
     "rebuild:native:electron": "node scripts/rebuild-native.js electron",
     "rebuild:native:node": "node scripts/rebuild-native.js node",
     "start:node1": "node scripts/run-node.js node1",
     "start:node2": "node scripts/run-node.js node2",
-    "test:core": "npm run build && node --test test/**/*.test.js",
-    "test:electron": "npm run build && npm run rebuild:native:electron && electron scripts/electron-tests.js",
+    "test:core": "npm run build:main && node --test test/**/*.test.js",
+    "test:electron": "npm run build:main && npm run rebuild:native:electron && electron scripts/electron-tests.js",
     "test": "npm run test:core && npm run test:electron",
     "package:dir": "npm run build && npm run rebuild:native:electron && electron-builder --dir",
     "package:win": "npm run build && npm run rebuild:native:electron && electron-builder --win nsis",
     "release:prepare": "npm test && npm run package:win"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.0",
     "electron": "^30.0.0",
     "electron-builder": "^24.13.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0"
   },
   "dependencies": {
     "@noble/curves": "1.8.2",
     "@prisma/adapter-better-sqlite3": "^7.4.1",
     "@prisma/client": "^7.4.1",
     "better-sqlite3": "^12.6.2",
-    "prisma": "^7.4.1"
+    "prisma": "^7.4.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "build": {
     "appId": "com.zip.desktop",

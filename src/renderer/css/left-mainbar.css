@@ -1,0 +1,80 @@
+.left-mainbar {
+  min-width: 0;
+  min-height: 0;
+  padding: 14px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-soft);
+}
+
+.left-mainbar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.left-mainbar__header h3 {
+  font-family: var(--font-display);
+  font-size: 16px;
+}
+
+.left-mainbar__header button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.left-mainbar__filters {
+  display: flex;
+  gap: 8px;
+}
+
+.left-mainbar__filters span {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.left-mainbar__filters .is-active {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.left-mainbar__channels {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.left-mainbar__channel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 10px 11px;
+  display: grid;
+  gap: 3px;
+}
+
+.left-mainbar__channel strong {
+  font-size: 13px;
+}
+
+.left-mainbar__channel small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
