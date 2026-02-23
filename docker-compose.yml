@@ -1,0 +1,22 @@
+services:
+  zip:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zip:local
+    container_name: zip-app
+    restart: unless-stopped
+    environment:
+      ZIP_P2P_ENABLED: "true"
+      ZIP_P2P_HOST: "0.0.0.0"
+      ZIP_P2P_PORT: "7070"
+      ZIP_P2P_SEEDS: "${ZIP_P2P_SEEDS:-}"
+      ZIP_DB_PATH: "/data/zip.db"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-change-me}"
+    ports:
+      - "7070:7070"
+    volumes:
+      - zip_data:/data
+
+volumes:
+  zip_data:
