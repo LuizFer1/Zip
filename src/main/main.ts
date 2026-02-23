@@ -1,6 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import 'dotenv/config';
 import { IdentityService } from '../core/indentity/identity.service';
 import { PeerService } from '../core/network/peer.service';
@@ -585,20 +584,31 @@ ipcMain.handle('p2p:disconnect', async (): Promise<UIP2PStatus> => {
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 900,
-    minHeight: 600,
-    backgroundColor: '#07071a',
+    width: 960,
+    height: 640,
+    minWidth: 640,
+    minHeight: 480,
+    backgroundColor: '#101014',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: path.join(__dirname, 'preload.js'),
     },
   });
 
-  mainWindow.maximize();
-  mainWindow.loadFile(path.join(__dirname, '..', '..', 'src', 'renderer', 'index.html'));
+  const placeholderHtml = [
+    '<!doctype html>',
+    '<html lang="pt-BR">',
+    '<head><meta charset="utf-8"><title>Zip</title></head>',
+    '<body style="margin:0;display:grid;place-items:center;height:100vh;font-family:Segoe UI,Arial,sans-serif;background:#101014;color:#e5e7eb;">',
+    '<main style="text-align:center;max-width:540px;padding:24px;">',
+    '<h1 style="margin:0 0 12px;font-size:28px;">Frontend removido</h1>',
+    '<p style="margin:0;color:#9ca3af;line-height:1.5;">A interface anterior foi apagada para iniciar um novo design.</p>',
+    '</main>',
+    '</body>',
+    '</html>',
+  ].join('');
+
+  void mainWindow.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(placeholderHtml)}`);
 }
 
 app.whenReady().then(() => {
