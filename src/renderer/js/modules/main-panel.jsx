@@ -120,7 +120,16 @@ function ConnectionView({ identity, p2pStatus, remoteNodeId, onRemoteNodeIdChang
   );
 }
 
-function ChatsView({ channels, activeChannel, messages, composerText, onComposerTextChange, onSendMessage, onCreateGroup }) {
+function ChatsView({
+  channels,
+  activeChannel,
+  messages,
+  composerText,
+  onComposerTextChange,
+  onSendMessage,
+  onCreateGroup,
+  onCreateSubchannel,
+}) {
   if (channels.length === 0 || !activeChannel) {
     return (
       <div className="main-panel__empty">
@@ -138,6 +147,16 @@ function ChatsView({ channels, activeChannel, messages, composerText, onComposer
           <h2>{activeChannel.name}</h2>
           <p>{activeChannel.memberCount} membros</p>
         </div>
+        {activeChannel.channelType !== "direct" ? (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="main-panel__action" onClick={() => onCreateSubchannel("text")}>
+              Canal texto
+            </button>
+            <button type="button" className="main-panel__action" onClick={() => onCreateSubchannel("voice_video")}>
+              Canal voz/video
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="main-panel__feed scroll-region">
@@ -181,6 +200,7 @@ export function MainPanel({
   onComposerTextChange,
   onSendMessage,
   onCreateGroup,
+  onCreateSubchannel,
   creatingGroup,
   p2pStatus,
   remoteNodeId,
@@ -221,6 +241,7 @@ export function MainPanel({
           onComposerTextChange={onComposerTextChange}
           onSendMessage={onSendMessage}
           onCreateGroup={onCreateGroup}
+          onCreateSubchannel={onCreateSubchannel}
         />
       )}
     </main>

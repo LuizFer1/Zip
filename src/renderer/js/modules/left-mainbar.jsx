@@ -4,6 +4,13 @@ function avatarFrom(name) {
   return name ? name.slice(0, 2).toUpperCase() : "?";
 }
 
+function channelLabel(channel) {
+  if (channel.channelType === "voice_video") return `[voz] ${channel.name}`;
+  if (channel.channelType === "text") return `# ${channel.name}`;
+  if (channel.channelType === "direct") return `DM ${channel.name}`;
+  return channel.name;
+}
+
 function HomeFriends({ friends }) {
   return (
     <>
@@ -91,7 +98,7 @@ function Chats({ channels, activeChannelId, onSelectChannel, onCreateGroup, crea
               >
                 <div className="left-mainbar__channel-icon">{avatarFrom(channel.name)}</div>
                 <div className="left-mainbar__item-info">
-                  <strong>{channel.name}</strong>
+                  <strong>{channelLabel(channel)}</strong>
                   <small>{channel.memberCount} membros</small>
                 </div>
               </button>

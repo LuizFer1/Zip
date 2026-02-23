@@ -14,7 +14,11 @@ const api: ZipAPI = {
   getIdentity: () => ipcRenderer.invoke("identity:get"),
   createIdentity: (username: string) => ipcRenderer.invoke("identity:create", username),
   listChannels: () => ipcRenderer.invoke("channel:list"),
-  createChannel: (name: string, description?: string) => ipcRenderer.invoke("channel:create", name, description),
+  createChannel: (
+    name: string,
+    description?: string,
+    options?: { channelType?: "group" | "text" | "voice_video"; parentGroupId?: string },
+  ) => ipcRenderer.invoke("channel:create", name, description, options),
   listMessages: (channelId: string) => ipcRenderer.invoke("message:list", channelId),
   sendMessage: (channelId: string, content: string) => ipcRenderer.invoke("message:send", channelId, content),
   connectP2P: () => ipcRenderer.invoke("p2p:connect"),
@@ -72,7 +76,11 @@ declare global {
       getIdentity: () => Promise<UIProfile | null>;
       createIdentity: (username: string) => Promise<UIProfile>;
       listChannels: () => Promise<UIChannel[]>;
-      createChannel: (name: string, description?: string) => Promise<UIChannel>;
+      createChannel: (
+        name: string,
+        description?: string,
+        options?: { channelType?: "group" | "text" | "voice_video"; parentGroupId?: string },
+      ) => Promise<UIChannel>;
       listMessages: (channelId: string) => Promise<UIMessage[]>;
       sendMessage: (channelId: string, content: string) => Promise<void>;
       connectP2P: () => Promise<UIP2PStatus>;

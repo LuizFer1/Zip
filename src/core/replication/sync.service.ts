@@ -3,6 +3,7 @@ import { EventService } from '../protocol/event.service';
 import { HeadsService } from './heads.service';
 
 const DEFAULT_MAX_EVENTS_PER_BATCH = 250;
+const DIRECT_CHANNEL_PREFIX = 'dm-';
 
 export interface SyncCursor {
   channelId: string;
@@ -23,11 +24,13 @@ export class SyncService {
 
   async buildCursor(): Promise<SyncCursor[]> {
     const heads = await this.headsService.listHeads();
-    return heads.map((head) => ({
+    return heads
+      .filter((head) => !head.channelId.startsWith(DIRECT_CHANNEL_PREFIX))
+      .map((head) => ({
       channelId: head.channelId,
       lastEventId: head.eventId,
       lastTimestamp: head.timestamp,
-    }));
+      }));
   }
 
   async collectMissingEvents(
@@ -40,6 +43,9 @@ export class SyncService {
     const selected: Event[] = [];
 
     for (const channelId of channelIds) {
+      if (channelId.startsWith(DIRECT_CHANNEL_PREFIX)) {
+        continue;
+      }
       const events = await this.eventService.listByChannel(channelId);
       if (events.length === 0) {
         continue;

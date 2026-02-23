@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SyncService = void 0;
 const heads_service_1 = require("./heads.service");
 const DEFAULT_MAX_EVENTS_PER_BATCH = 250;
+const DIRECT_CHANNEL_PREFIX = 'dm-';
 class SyncService {
     constructor(eventService, headsService = new heads_service_1.HeadsService(eventService)) {
         this.eventService = eventService;
@@ -10,7 +11,9 @@ class SyncService {
     }
     async buildCursor() {
         const heads = await this.headsService.listHeads();
-        return heads.map((head) => ({
+        return heads
+            .filter((head) => !head.channelId.startsWith(DIRECT_CHANNEL_PREFIX))
+            .map((head) => ({
             channelId: head.channelId,
             lastEventId: head.eventId,
             lastTimestamp: head.timestamp,
@@ -22,6 +25,9 @@ class SyncService {
         const channelIds = await this.eventService.listChannelIds();
         const selected = [];
         for (const channelId of channelIds) {
+            if (channelId.startsWith(DIRECT_CHANNEL_PREFIX)) {
+                continue;
+            }
             const events = await this.eventService.listByChannel(channelId);
             if (events.length === 0) {
                 continue;

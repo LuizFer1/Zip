@@ -314,6 +314,16 @@ export function Layout() {
     [channels]
   );
 
+  const friends = useMemo(
+    () => contacts.map((contact) => ({
+      id: contact.nodeId,
+      name: contact.username,
+      handle: contact.nodeId,
+      status: contact.connected ? "online" : "offline",
+    })),
+    [contacts]
+  );
+
   const onCreateIdentity = async (event) => {
     event.preventDefault();
     const username = identityName.trim();
@@ -348,6 +358,35 @@ export function Layout() {
     setGroupModalName("");
     setSelectedInviteNodeIds([]);
     setGroupModalOpen(true);
+  };
+
+  const onCreateSubchannel = async (channelType) => {
+    if (!api || !activeChannel) return;
+    if (activeChannel.channelType === "direct") {
+      setStatusMessage("Chat direto nao permite subcanais.");
+      return;
+    }
+
+    const parentGroupId = activeChannel.parentGroupId ?? activeChannel.id;
+    const suggested = channelType === "voice_video" ? "Sala de voz" : "novo-canal";
+    const name = window.prompt(
+      channelType === "voice_video"
+        ? "Nome do canal de voz/video:"
+        : "Nome do canal de texto:",
+      suggested
+    );
+    if (!name || !name.trim()) return;
+
+    try {
+      const created = await api.createChannel(name.trim(), "", { channelType, parentGroupId });
+      await refreshChannels();
+      setActiveChannelId(created.id);
+      setActivePage("chats");
+      setStatusMessage(`Canal ${channelType === "voice_video" ? "voz/video" : "texto"} criado.`);
+    } catch (error) {
+      console.error("[renderer] create subchannel failed", error);
+      setStatusMessage("Falha ao criar subcanal.");
+    }
   };
 
   const onCancelCreateGroup = () => {
@@ -596,7 +635,7 @@ export function Layout() {
         <section className="main-layout">
           <LeftMainbar
             activePage={activePage}
-            friends={[]}
+            friends={friends}
             channels={channels}
             activeChannelId={activeChannelId}
             contacts={contacts}
@@ -610,7 +649,7 @@ export function Layout() {
           <MainPanel
             activePage={activePage}
             identity={identity}
-            friends={[]}
+            friends={friends}
             updateLog={[]}
             channels={channels}
             activeChannel={activeChannel}
@@ -619,6 +658,7 @@ export function Layout() {
             onComposerTextChange={setComposerText}
             onSendMessage={onSendMessage}
             onCreateGroup={onCreateGroup}
+            onCreateSubchannel={onCreateSubchannel}
             creatingGroup={creatingGroup}
             p2pStatus={p2pStatus}
             remoteNodeId={remoteNodeId}
@@ -636,7 +676,7 @@ export function Layout() {
         <RightSidebar
           activePage={activePage}
           identity={identity}
-          friends={[]}
+          friends={friends}
           channels={channels}
           activeChannel={activeChannel}
           p2pStatus={p2pStatus}

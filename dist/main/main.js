@@ -49,6 +49,7 @@ const BACKUP_INTERVAL_MS = parsePositiveInt(process.env.ZIP_BACKUP_INTERVAL_MS, 
 const BACKUP_DIR = process.env.ZIP_BACKUP_DIR;
 const BACKUP_HTTP_ENDPOINT = process.env.ZIP_BACKUP_HTTP_ENDPOINT?.trim();
 const BACKUP_HTTP_TOKEN = process.env.ZIP_BACKUP_HTTP_TOKEN?.trim();
+const DIRECT_CHANNEL_PREFIX = 'dm-';
 // ── IPC Helpers ───────────────────────────────────────────────
 function initials(username) {
     return username
@@ -202,6 +203,144 @@ function readInviteResponsePayload(payload) {
         responderPublicKey: data.responderPublicKey,
         responderUsername: data.responderUsername,
     };
+}
+function readDirectChatOpenPayload(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+    const data = payload;
+    if (typeof data.channelId !== 'string' || !data.channelId.trim())
+        return null;
+    if (typeof data.fromNodeId !== 'string' || !data.fromNodeId.trim())
+        return null;
+    if (typeof data.fromPublicKey !== 'string' || !data.fromPublicKey.trim())
+        return null;
+    if (typeof data.fromUsername !== 'string' || !data.fromUsername.trim())
+        return null;
+    if (data.fromAvatar !== undefined && typeof data.fromAvatar !== 'string')
+        return null;
+    if (!Array.isArray(data.participantsNodeIds) || data.participantsNodeIds.length !== 2)
+        return null;
+    if (!Array.isArray(data.bootstrapEvents))
+        return null;
+    const [left, right] = data.participantsNodeIds;
+    if (typeof left !== 'string' || !left.trim() || typeof right !== 'string' || !right.trim())
+        return null;
+    if (!data.bootstrapEvents.every((entry) => typeof entry === 'string'))
+        return null;
+    return {
+        channelId: data.channelId,
+        fromNodeId: data.fromNodeId,
+        fromPublicKey: data.fromPublicKey,
+        fromUsername: data.fromUsername,
+        fromAvatar: typeof data.fromAvatar === 'string' ? data.fromAvatar : undefined,
+        participantsNodeIds: [left, right],
+        bootstrapEvents: data.bootstrapEvents,
+    };
+}
+function slugify(value) {
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+    return normalized.length > 0 ? normalized : (0, node_crypto_1.randomUUID)().slice(0, 8);
+}
+function buildGroupChannelId(name, parentGroupId) {
+    const base = slugify(name);
+    return parentGroupId ? `${parentGroupId}::${base}` : base;
+}
+function buildDirectChannelId(localNodeId, remoteNodeId) {
+    const [a, b] = [localNodeId.trim(), remoteNodeId.trim()].sort();
+    return `${DIRECT_CHANNEL_PREFIX}${a.slice(0, 16)}-${b.slice(0, 16)}`;
+}
+function parseChannelCreateMeta(payload, channelId) {
+    let decoded = {};
+    try {
+        decoded = event_serializer_1.EventSerializer.decodePayload(payload);
+    }
+    catch {
+        // Keep default values if event payload is malformed.
+    }
+    const name = typeof decoded.name === 'string' && decoded.name.trim()
+        ? decoded.name.trim()
+        : channelId;
+    const description = typeof decoded.description === 'string' ? decoded.description : '';
+    let channelType = 'group';
+    if (description === 'direct') {
+        channelType = 'direct';
+    }
+    if (decoded.channelType === 'group'
+        || decoded.channelType === 'text'
+        || decoded.channelType === 'voice_video'
+        || decoded.channelType === 'direct') {
+        channelType = decoded.channelType;
+    }
+    const parentGroupId = typeof decoded.parentGroupId === 'string' && decoded.parentGroupId.trim()
+        ? decoded.parentGroupId.trim()
+        : undefined;
+    let participantsNodeIds;
+    if (Array.isArray(decoded.participantsNodeIds) && decoded.participantsNodeIds.length === 2) {
+        const [left, right] = decoded.participantsNodeIds;
+        if (typeof left === 'string'
+            && typeof right === 'string'
+            && left.trim().length > 0
+            && right.trim().length > 0) {
+            participantsNodeIds = [left, right];
+        }
+    }
+    return {
+        name,
+        description,
+        channelType,
+        parentGroupId,
+        participantsNodeIds,
+    };
+}
+function directPeerNodeId(meta, localNodeId) {
+    if (meta.channelType !== 'direct' || !meta.participantsNodeIds) {
+        return null;
+    }
+    if (meta.participantsNodeIds[0] === localNodeId) {
+        return meta.participantsNodeIds[1];
+    }
+    if (meta.participantsNodeIds[1] === localNodeId) {
+        return meta.participantsNodeIds[0];
+    }
+    return null;
+}
+async function loadChannelMeta(channelId) {
+    const events = await eventService.listByChannel(channelId, { types: ['channel.create'] });
+    const created = events.find((event) => event.type === 'channel.create');
+    if (!created) {
+        return null;
+    }
+    return {
+        meta: parseChannelCreateMeta(created.payload, channelId),
+        createdAt: created.timestamp,
+    };
+}
+async function canAccessChannel(channelId, localPublicKey, localNodeId) {
+    const metaData = await loadChannelMeta(channelId);
+    if (!metaData) {
+        return false;
+    }
+    if (metaData.meta.channelType === 'direct') {
+        const participants = metaData.meta.participantsNodeIds
+            ? [...metaData.meta.participantsNodeIds]
+            : [];
+        return participants.includes(localNodeId);
+    }
+    const membershipEvents = await eventService.listByChannel(channelId, { types: ['member.join'] });
+    return membershipEvents.some((event) => {
+        try {
+            const payload = event_serializer_1.EventSerializer.decodePayload(event.payload);
+            return normalizePublicKey(payload.member) === localPublicKey;
+        }
+        catch {
+            return false;
+        }
+    });
 }
 function parsePort(rawPort, fallback) {
     if (!rawPort) {
@@ -382,6 +521,34 @@ async function handleInviteResponseReceived(payload) {
         }
     }
 }
+async function handleDirectChatOpenReceived(payload) {
+    const localIdentity = await identityService.loadLocalIdentity();
+    if (!localIdentity) {
+        return;
+    }
+    await upsertRemoteIdentityFromShare({
+        nodeId: payload.fromNodeId,
+        publicKey: payload.fromPublicKey,
+        username: payload.fromUsername,
+        avatar: payload.fromAvatar,
+    });
+    await channelRepository.createIfMissing({
+        id: payload.channelId,
+        creator: normalizePublicKey(payload.fromPublicKey),
+        createdAt: Date.now(),
+    });
+    for (const serializedEvent of payload.bootstrapEvents) {
+        try {
+            const event = await eventService.deserializeAndIngest(serializedEvent);
+            emitUIEventUpdate(event, 'remote');
+        }
+        catch (error) {
+            if (!(error instanceof event_service_1.DuplicateEventError)) {
+                throw error;
+            }
+        }
+    }
+}
 async function handleTransportMessage(message) {
     if (message.envelope.type === 'identity.share') {
         const payload = readIdentitySharePayload(message.envelope.payload);
@@ -405,6 +572,13 @@ async function handleTransportMessage(message) {
         if (!payload)
             return;
         await handleInviteResponseReceived(payload);
+        return;
+    }
+    if (message.envelope.type === 'direct-chat.open') {
+        const payload = readDirectChatOpenPayload(message.envelope.payload);
+        if (!payload)
+            return;
+        await handleDirectChatOpenReceived(payload);
     }
 }
 async function startP2P() {
@@ -412,9 +586,9 @@ async function startP2P() {
         return;
     }
     const identity = await identityService.loadLocalIdentity();
-    const nodeId = P2P_NODE_ID && P2P_NODE_ID.length > 0
-        ? P2P_NODE_ID
-        : (identity ? normalizePublicKey(identity.publicKey) : (0, node_crypto_1.randomUUID)());
+    const nodeId = identity
+        ? normalizePublicKey(identity.publicKey)
+        : (P2P_NODE_ID && P2P_NODE_ID.length > 0 ? P2P_NODE_ID : (0, node_crypto_1.randomUUID)());
     const seeds = P2P_SEEDS.filter((seed) => !(seed.port === P2P_PORT && isSameHost(seed.host, P2P_HOST)));
     const transport = new transport_1.P2PTransport({
         nodeId,
@@ -566,7 +740,8 @@ electron_1.ipcMain.handle('identity:get', async () => {
     };
 });
 electron_1.ipcMain.handle('identity:create', async (_event, username) => {
-    const identity = await identityService.createLocalIdentity(username, null);
+    const existing = await identityService.loadLocalIdentity();
+    const identity = existing ?? await identityService.createLocalIdentity(username, null);
     return {
         publicKey: normalizePublicKey(identity.publicKey),
         username: identity.username,
@@ -574,17 +749,51 @@ electron_1.ipcMain.handle('identity:create', async (_event, username) => {
     };
 });
 electron_1.ipcMain.handle('channel:list', async () => {
-    const channels = await channelRepository.list();
+    const identity = await identityService.loadLocalIdentity();
+    if (!identity) {
+        return [];
+    }
+    const localPublicKey = normalizePublicKey(identity.publicKey);
+    const localNodeId = transportRef?.nodeId ?? localPublicKey;
+    const channelIds = await eventService.listChannelIds();
     const result = [];
-    for (const ch of channels) {
-        const events = await eventService.listByChannel(ch.id, {
-            types: ['member.join', 'message.create'],
+    for (const channelId of channelIds) {
+        const metaData = await loadChannelMeta(channelId);
+        if (!metaData) {
+            continue;
+        }
+        const accessible = await canAccessChannel(channelId, localPublicKey, localNodeId);
+        if (!accessible) {
+            continue;
+        }
+        const events = await eventService.listByChannel(channelId, {
+            types: ['member.join', 'member.leave', 'message.create'],
         });
-        let memberCount = 0;
+        const members = new Set();
         let lastMessage;
         for (const event of events) {
             if (event.type === 'member.join') {
-                memberCount += 1;
+                try {
+                    const payload = event_serializer_1.EventSerializer.decodePayload(event.payload);
+                    if (payload.member) {
+                        members.add(normalizePublicKey(payload.member));
+                    }
+                }
+                catch {
+                    // Ignore malformed payload and keep listing.
+                }
+                continue;
+            }
+            if (event.type === 'member.leave') {
+                try {
+                    const payload = event_serializer_1.EventSerializer.decodePayload(event.payload);
+                    if (payload.member) {
+                        members.delete(normalizePublicKey(payload.member));
+                    }
+                }
+                catch {
+                    // Ignore malformed payload and keep listing.
+                }
                 continue;
             }
             if (event.type === 'message.create') {
@@ -597,33 +806,51 @@ electron_1.ipcMain.handle('channel:list', async () => {
                 }
             }
         }
+        const peerNodeId = directPeerNodeId(metaData.meta, localNodeId);
+        const displayName = metaData.meta.channelType === 'direct'
+            ? (peerNodeId ? (contactsByNodeId.get(peerNodeId)?.username ?? metaData.meta.name) : metaData.meta.name)
+            : metaData.meta.name;
         result.push({
-            id: ch.id,
-            name: ch.id, // channel id is used as name (set during creation)
-            description: '',
-            memberCount: memberCount || 1,
+            id: channelId,
+            name: displayName,
+            description: metaData.meta.description,
+            channelType: metaData.meta.channelType,
+            parentGroupId: metaData.meta.parentGroupId,
+            memberCount: metaData.meta.channelType === 'direct' ? 2 : Math.max(1, members.size),
             lastMessage,
         });
     }
+    result.sort((a, b) => a.name.localeCompare(b.name));
     return result;
 });
-electron_1.ipcMain.handle('channel:create', async (_event, name, description) => {
+electron_1.ipcMain.handle('channel:create', async (_event, name, description, options) => {
     const identity = await identityService.loadLocalIdentity();
     if (!identity)
         throw new Error('No identity');
     const publicKeyHex = normalizePublicKey(identity.publicKey);
     const privateKey = await identityService.getLocalPrivateKey();
-    const channelId = name.toLowerCase().replace(/\s+/g, '-');
+    const channelType = options?.channelType ?? 'group';
+    const parentGroupId = options?.parentGroupId?.trim() || undefined;
+    const channelId = buildGroupChannelId(name, parentGroupId);
+    const metaPayload = {
+        name,
+        description: description ?? '',
+        channelType,
+    };
+    if (parentGroupId) {
+        metaPayload.parentGroupId = parentGroupId;
+    }
+    const createdAt = Date.now();
     await channelRepository.createIfMissing({
         id: channelId,
         creator: publicKeyHex,
-        createdAt: Date.now(),
+        createdAt,
     });
     const channelCreated = await eventService.publish({
         channelId,
         author: publicKeyHex,
         type: 'channel.create',
-        payload: { name, description: description ?? '' },
+        payload: metaPayload,
         privateKey,
     });
     emitUIEventUpdate(channelCreated, 'local');
@@ -641,13 +868,23 @@ electron_1.ipcMain.handle('channel:create', async (_event, name, description) =>
         id: channelId,
         name,
         description: description ?? '',
+        channelType,
+        parentGroupId,
         memberCount: 1,
         lastMessage: undefined,
     };
 });
 electron_1.ipcMain.handle('message:list', async (_event, channelId) => {
     const identity = await identityService.loadLocalIdentity();
+    if (!identity) {
+        return [];
+    }
     const myKey = identity ? normalizePublicKey(identity.publicKey) : null;
+    const localNodeId = transportRef?.nodeId ?? myKey ?? '';
+    const allowed = await canAccessChannel(channelId, myKey ?? '', localNodeId);
+    if (!allowed) {
+        return [];
+    }
     const events = await eventService.listByChannel(channelId, {
         types: ['message.create', 'message.edit', 'message.delete'],
     });
@@ -710,6 +947,11 @@ electron_1.ipcMain.handle('message:send', async (_event, channelId, content) => 
     if (!identity)
         throw new Error('No identity');
     const publicKeyHex = normalizePublicKey(identity.publicKey);
+    const localNodeId = transportRef?.nodeId ?? publicKeyHex;
+    const allowed = await canAccessChannel(channelId, publicKeyHex, localNodeId);
+    if (!allowed) {
+        throw new Error('Channel is not accessible for this identity');
+    }
     const privateKey = await identityService.getLocalPrivateKey();
     const messageCreated = await eventService.publish({
         channelId,
@@ -719,6 +961,18 @@ electron_1.ipcMain.handle('message:send', async (_event, channelId, content) => 
         privateKey,
     });
     emitUIEventUpdate(messageCreated, 'local');
+    const metaData = await loadChannelMeta(channelId);
+    if (metaData?.meta.channelType === 'direct') {
+        const peerNodeId = directPeerNodeId(metaData.meta, localNodeId);
+        if (!peerNodeId) {
+            throw new Error('Direct channel peer not found');
+        }
+        const sent = gossipService?.sendEventToNode(peerNodeId, messageCreated) ?? false;
+        if (!sent) {
+            throw new Error('Direct peer is offline');
+        }
+        return;
+    }
     gossipService?.broadcastEvent(messageCreated);
 });
 electron_1.ipcMain.handle('p2p:status', async () => {
@@ -746,14 +1000,16 @@ electron_1.ipcMain.handle('contacts:start-direct-chat', async (_event, nodeId) =
     const identity = await identityService.loadLocalIdentity();
     if (!identity)
         throw new Error('No identity');
+    if (!transportRef)
+        throw new Error('P2P not connected');
     const contact = contactsByNodeId.get(nodeId);
     if (!contact)
         throw new Error('Unknown contact');
     const localKey = normalizePublicKey(identity.publicKey);
-    const remoteKey = normalizePublicKey(contact.publicKey);
-    const sorted = [localKey, remoteKey].sort();
-    const channelId = `dm-${sorted[0].slice(0, 12)}-${sorted[1].slice(0, 12)}`;
-    const channelName = `DM ${identity.username} x ${contact.username}`;
+    const localNodeId = transportRef.nodeId;
+    const channelId = buildDirectChannelId(localNodeId, nodeId);
+    const channelName = contact.username;
+    const participantsNodeIds = [localNodeId, nodeId].sort();
     await channelRepository.createIfMissing({
         id: channelId,
         creator: localKey,
@@ -765,11 +1021,15 @@ electron_1.ipcMain.handle('contacts:start-direct-chat', async (_event, nodeId) =
             channelId,
             author: localKey,
             type: 'channel.create',
-            payload: { name: channelName, description: 'direct' },
+            payload: {
+                name: channelName,
+                description: 'direct',
+                channelType: 'direct',
+                participantsNodeIds,
+            },
             privateKey,
         });
         emitUIEventUpdate(channelCreated, 'local');
-        gossipService?.broadcastEvent(channelCreated);
     }
     catch (error) {
         if (!(error instanceof event_service_1.DuplicateEventError)) {
@@ -785,29 +1045,31 @@ electron_1.ipcMain.handle('contacts:start-direct-chat', async (_event, nodeId) =
             privateKey,
         });
         emitUIEventUpdate(memberJoined, 'local');
-        gossipService?.broadcastEvent(memberJoined);
     }
     catch (error) {
         if (!(error instanceof event_service_1.DuplicateEventError)) {
             throw error;
         }
     }
-    if (transportRef && nodeId) {
-        const inviteId = (0, node_crypto_1.randomUUID)();
-        transportRef.sendToNode(nodeId, 'group.invite', {
-            inviteId,
+    if (nodeId) {
+        const bootstrapEvents = await eventService.listByChannel(channelId);
+        const serializedEvents = bootstrapEvents.map((event) => event_serializer_1.EventSerializer.serialize(event));
+        transportRef.sendToNode(nodeId, 'direct-chat.open', {
             channelId,
-            channelName,
             fromNodeId: transportRef.nodeId,
             fromPublicKey: localKey,
             fromUsername: identity.username,
+            fromAvatar: identity.avatar ?? undefined,
+            participantsNodeIds,
+            bootstrapEvents: serializedEvents,
         });
     }
     return {
         id: channelId,
         name: channelName,
         description: 'direct',
-        memberCount: 1,
+        channelType: 'direct',
+        memberCount: 2,
         lastMessage: undefined,
     };
 });
@@ -817,9 +1079,8 @@ electron_1.ipcMain.handle('channel:invite', async (_event, channelId, nodeId) =>
         throw new Error('No identity');
     if (!transportRef)
         throw new Error('P2P not connected');
-    const channel = await channelRepository.list();
-    const target = channel.find((item) => item.id === channelId);
-    const channelName = target?.id ?? channelId;
+    const channelMeta = await loadChannelMeta(channelId);
+    const channelName = channelMeta?.meta.name ?? channelId;
     const localKey = normalizePublicKey(identity.publicKey);
     transportRef.sendToNode(nodeId, 'group.invite', {
         inviteId: (0, node_crypto_1.randomUUID)(),

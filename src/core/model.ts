@@ -164,6 +164,8 @@ export interface UIChannel {
   name: string;
   description: string;
   memberCount: number;
+  channelType?: 'group' | 'text' | 'voice_video' | 'direct';
+  parentGroupId?: string;
   lastMessage?: string;
 }
 
@@ -227,7 +229,11 @@ export interface ZipAPI {
   getIdentity(): Promise<UIProfile | null>;
   createIdentity(username: string): Promise<UIProfile>;
   listChannels(): Promise<UIChannel[]>;
-  createChannel(name: string, description?: string): Promise<UIChannel>;
+  createChannel(
+    name: string,
+    description?: string,
+    options?: { channelType?: 'group' | 'text' | 'voice_video'; parentGroupId?: string },
+  ): Promise<UIChannel>;
   listMessages(channelId: string): Promise<UIMessage[]>;
   sendMessage(channelId: string, content: string): Promise<void>;
   connectP2P(): Promise<UIP2PStatus>;
