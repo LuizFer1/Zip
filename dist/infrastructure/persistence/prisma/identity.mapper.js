@@ -16,6 +16,7 @@ class IdentityMapper {
             publicKey: row.publicKey,
             username: row.username ?? '',
             avatar: row.avatar ?? null,
+            nodeId: row.nodeId ?? undefined,
             createdAt: row.updatedAt,
         };
     }

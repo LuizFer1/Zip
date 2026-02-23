@@ -12,6 +12,7 @@ type IdentityRow = {
   publicKey: string;
   username: string | null;
   avatar: string | null;
+  nodeId: string | null;
   updatedAt: number;
 };
 
@@ -31,6 +32,7 @@ export class IdentityMapper {
       publicKey: row.publicKey,
       username: row.username ?? '',
       avatar: row.avatar ?? null,
+      nodeId: row.nodeId ?? undefined,
       createdAt: row.updatedAt,
     };
   }

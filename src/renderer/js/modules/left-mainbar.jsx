@@ -65,31 +65,86 @@ function Connections({ contacts, onStartDirectChat }) {
   );
 }
 
-function Chats({ channels, activeChannelId, onSelectChannel, onCreateGroup, creatingGroup }) {
+function Chats({
+  groups,
+  selectedGroup,
+  groupChannels,
+  activeChannelId,
+  onSelectGroup,
+  onSelectChannel,
+  onCreateGroup,
+  onOpenCreateChannelModal,
+  onOpenGroupMembersModal,
+  creatingGroup,
+}) {
+  if (!selectedGroup) {
+    return (
+      <>
+        <div className="left-mainbar__header">
+          <h3>Grupos</h3>
+          <button
+            type="button"
+            className="left-mainbar__icon-btn"
+            onClick={onCreateGroup}
+            disabled={creatingGroup}
+            title="Criar novo grupo"
+          >
+            {creatingGroup ? "..." : "+"}
+          </button>
+        </div>
+        {groups.length === 0 ? (
+          <div className="left-mainbar__empty">
+            <p>Nenhum grupo criado.</p>
+            <button type="button" onClick={onCreateGroup} disabled={creatingGroup}>
+              Criar grupo
+            </button>
+          </div>
+        ) : (
+          <ul className="left-mainbar__list scroll-region">
+            {groups.map((group) => (
+              <li key={group.id}>
+                <button
+                  type="button"
+                  className="left-mainbar__channel"
+                  onClick={() => onSelectGroup(group.id)}
+                >
+                  <div className="left-mainbar__channel-icon">{avatarFrom(group.name)}</div>
+                  <div className="left-mainbar__item-info">
+                    <strong>{group.name}</strong>
+                    <small>{group.memberCount} membros</small>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </>
+    );
+  }
+
   return (
     <>
       <div className="left-mainbar__header">
-        <h3>Conversas</h3>
-        <button
-          type="button"
-          className="left-mainbar__icon-btn"
-          onClick={onCreateGroup}
-          disabled={creatingGroup}
-          title="Criar novo grupo"
-        >
-          {creatingGroup ? "..." : "+"}
-        </button>
+        <h3>{selectedGroup.name}</h3>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="left-mainbar__icon-btn" onClick={onOpenCreateChannelModal} title="Adicionar canal">
+            +
+          </button>
+          <button type="button" className="left-mainbar__icon-btn" onClick={onOpenGroupMembersModal} title="Convidar membros">
+            @
+          </button>
+        </div>
       </div>
-      {channels.length === 0 ? (
+      {groupChannels.length === 0 ? (
         <div className="left-mainbar__empty">
-          <p>Nenhum grupo criado.</p>
-          <button type="button" onClick={onCreateGroup} disabled={creatingGroup}>
-            Criar grupo
+          <p>Sem canais neste grupo.</p>
+          <button type="button" onClick={onOpenCreateChannelModal}>
+            Adicionar canal
           </button>
         </div>
       ) : (
         <ul className="left-mainbar__list scroll-region">
-          {channels.map((channel) => (
+          {groupChannels.map((channel) => (
             <li key={channel.id}>
               <button
                 type="button"
@@ -114,10 +169,16 @@ export function LeftMainbar({
   activePage,
   friends,
   channels,
+  groups,
+  selectedGroup,
+  groupChannels,
   activeChannelId,
   contacts,
+  onSelectGroup,
   onSelectChannel,
   onCreateGroup,
+  onOpenCreateChannelModal,
+  onOpenGroupMembersModal,
   creatingGroup,
   onStartDirectChat,
 }) {
@@ -130,9 +191,15 @@ export function LeftMainbar({
       {activePage === "chats" && (
         <Chats
           channels={channels}
+          groups={groups}
+          selectedGroup={selectedGroup}
+          groupChannels={groupChannels}
           activeChannelId={activeChannelId}
+          onSelectGroup={onSelectGroup}
           onSelectChannel={onSelectChannel}
           onCreateGroup={onCreateGroup}
+          onOpenCreateChannelModal={onOpenCreateChannelModal}
+          onOpenGroupMembersModal={onOpenGroupMembersModal}
           creatingGroup={creatingGroup}
         />
       )}

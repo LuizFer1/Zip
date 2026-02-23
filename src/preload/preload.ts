@@ -3,6 +3,7 @@ import type {
   UIContact,
   UIChannel,
   UIEventUpdate,
+  UIGroupMember,
   UIInvite,
   UIMessage,
   UIP2PStatus,
@@ -17,7 +18,11 @@ const api: ZipAPI = {
   createChannel: (
     name: string,
     description?: string,
-    options?: { channelType?: "group" | "text" | "voice_video"; parentGroupId?: string },
+    options?: {
+      channelType?: "group" | "text" | "voice_video";
+      parentGroupId?: string;
+      allowedRoles?: Array<"admin" | "suporte" | "membro">;
+    },
   ) => ipcRenderer.invoke("channel:create", name, description, options),
   listMessages: (channelId: string) => ipcRenderer.invoke("message:list", channelId),
   sendMessage: (channelId: string, content: string) => ipcRenderer.invoke("message:send", channelId, content),
@@ -27,6 +32,9 @@ const api: ZipAPI = {
   listContacts: () => ipcRenderer.invoke("contacts:list"),
   startDirectChat: (nodeId: string) => ipcRenderer.invoke("contacts:start-direct-chat", nodeId),
   invitePeerToChannel: (channelId: string, nodeId: string) => ipcRenderer.invoke("channel:invite", channelId, nodeId),
+  listGroupMembers: (groupId: string) => ipcRenderer.invoke("group:members", groupId),
+  setGroupMemberRole: (groupId: string, memberPublicKey: string, role: "admin" | "suporte" | "membro") =>
+    ipcRenderer.invoke("group:set-role", groupId, memberPublicKey, role),
   listInvites: () => ipcRenderer.invoke("invite:list"),
   respondInvite: (inviteId: string, accept: boolean) => ipcRenderer.invoke("invite:respond", inviteId, accept),
   onEventsChanged: (listener: (update: UIEventUpdate) => void) => {
@@ -79,7 +87,11 @@ declare global {
       createChannel: (
         name: string,
         description?: string,
-        options?: { channelType?: "group" | "text" | "voice_video"; parentGroupId?: string },
+        options?: {
+          channelType?: "group" | "text" | "voice_video";
+          parentGroupId?: string;
+          allowedRoles?: Array<"admin" | "suporte" | "membro">;
+        },
       ) => Promise<UIChannel>;
       listMessages: (channelId: string) => Promise<UIMessage[]>;
       sendMessage: (channelId: string, content: string) => Promise<void>;
@@ -89,6 +101,8 @@ declare global {
       listContacts: () => Promise<UIContact[]>;
       startDirectChat: (nodeId: string) => Promise<UIChannel>;
       invitePeerToChannel: (channelId: string, nodeId: string) => Promise<void>;
+      listGroupMembers: (groupId: string) => Promise<UIGroupMember[]>;
+      setGroupMemberRole: (groupId: string, memberPublicKey: string, role: "admin" | "suporte" | "membro") => Promise<void>;
       listInvites: () => Promise<UIInvite[]>;
       respondInvite: (inviteId: string, accept: boolean) => Promise<void>;
       onEventsChanged: (listener: (update: UIEventUpdate) => void) => () => void;

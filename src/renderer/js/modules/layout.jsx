@@ -141,6 +141,184 @@ function CreateGroupModal({
   );
 }
 
+function CreateChannelModal({
+  open,
+  channelName,
+  channelType,
+  allowedRoles,
+  onChannelNameChange,
+  onChannelTypeChange,
+  onToggleRole,
+  onConfirm,
+  onCancel,
+  creating,
+  groupName,
+}) {
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (open && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && onCancel()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="create-channel-title">
+        <div className="modal__header">
+          <div className="modal__header-text">
+            <h2 className="modal__title" id="create-channel-title">Adicionar canal</h2>
+            <p className="modal__subtitle">Grupo: {groupName}</p>
+          </div>
+          <button className="modal__close" type="button" onClick={onCancel} title="Fechar">X</button>
+        </div>
+        <form
+          className="modal__form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onConfirm();
+          }}
+        >
+          <label className="modal__label" htmlFor="channel-name">
+            <span className="modal__label-text">Nome do canal</span>
+            <input
+              id="channel-name"
+              ref={inputRef}
+              className="modal__input"
+              type="text"
+              value={channelName}
+              onChange={(event) => onChannelNameChange(event.target.value)}
+              placeholder="geral"
+              maxLength={40}
+              autoComplete="off"
+            />
+          </label>
+          <label className="modal__label" htmlFor="channel-type">
+            <span className="modal__label-text">Tipo</span>
+            <select
+              id="channel-type"
+              className="modal__input"
+              value={channelType}
+              onChange={(event) => onChannelTypeChange(event.target.value)}
+            >
+              <option value="text">Texto</option>
+              <option value="voice_video">Voz/Video</option>
+            </select>
+          </label>
+          <div className="modal__peer-select">
+            <strong>Quem pode ver este chat</strong>
+            <div className="modal__peer-list">
+              {["admin", "suporte", "membro"].map((role) => (
+                <label key={role} className="modal__peer-item">
+                  <input
+                    type="checkbox"
+                    checked={allowedRoles.includes(role)}
+                    onChange={() => onToggleRole(role)}
+                  />
+                  <span>{role}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="modal__actions">
+            <button className="modal__cancel-btn" type="button" onClick={onCancel}>Cancelar</button>
+            <button className="modal__confirm-btn" type="submit" disabled={!channelName.trim() || creating || allowedRoles.length === 0}>
+              {creating ? "Criando..." : "Criar canal"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function GroupMembersModal({
+  open,
+  groupName,
+  members,
+  loading,
+  selectedNodeIds,
+  onToggleNodeId,
+  selectedRole,
+  onSelectedRoleChange,
+  onApplyRole,
+  settingRole,
+  onConfirm,
+  onCancel,
+  inviting,
+}) {
+  if (!open) return null;
+
+  const available = members.filter((member) => typeof member.nodeId === "string" && member.nodeId.trim().length > 0);
+
+  return (
+    <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && onCancel()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="group-members-title">
+        <div className="modal__header">
+          <div className="modal__header-text">
+            <h2 className="modal__title" id="group-members-title">Membros disponiveis</h2>
+            <p className="modal__subtitle">Grupo: {groupName}</p>
+          </div>
+          <button className="modal__close" type="button" onClick={onCancel} title="Fechar">X</button>
+        </div>
+        <div className="modal__peer-select">
+          <strong>NodeIDs disponiveis para adicionar</strong>
+          {loading ? (
+            <p>Carregando membros...</p>
+          ) : available.length === 0 ? (
+            <p>Nenhum nodeId disponivel neste grupo.</p>
+          ) : (
+            <div className="modal__peer-list">
+              {available.map((member) => (
+                <label key={member.publicKey} className="modal__peer-item">
+                  <input
+                    type="checkbox"
+                    checked={selectedNodeIds.includes(member.nodeId)}
+                    onChange={() => onToggleNodeId(member.nodeId)}
+                  />
+                  <span>{member.username}</span>
+                  <small>{member.nodeId} {member.connected ? "(online)" : "(offline)"}</small>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal__peer-select">
+          <strong>Papel dos membros no grupo</strong>
+          <div className="modal__actions" style={{ justifyContent: "flex-start" }}>
+            <select className="modal__input" value={selectedRole} onChange={(event) => onSelectedRoleChange(event.target.value)}>
+              <option value="membro">membro</option>
+              <option value="suporte">suporte</option>
+              <option value="admin">admin</option>
+            </select>
+            <button
+              className="modal__confirm-btn"
+              type="button"
+              disabled={selectedNodeIds.length === 0 || settingRole || loading}
+              onClick={onApplyRole}
+            >
+              {settingRole ? "Aplicando..." : "Aplicar papel aos selecionados"}
+            </button>
+          </div>
+        </div>
+        <div className="modal__actions">
+          <button className="modal__cancel-btn" type="button" onClick={onCancel}>Fechar</button>
+          <button
+            className="modal__confirm-btn"
+            type="button"
+            disabled={selectedNodeIds.length === 0 || inviting || loading}
+            onClick={onConfirm}
+          >
+            {inviting ? "Enviando..." : "Adicionar selecionados"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Layout() {
   const api = typeof window !== "undefined" ? window.zipAPI ?? null : null;
 
@@ -151,6 +329,7 @@ export function Layout() {
   const [creatingIdentity, setCreatingIdentity] = useState(false);
   const [activePage, setActivePage] = useState("home");
   const [channels, setChannels] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
   const [activeChannelId, setActiveChannelId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [composerText, setComposerText] = useState("");
@@ -167,6 +346,18 @@ export function Layout() {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [groupModalName, setGroupModalName] = useState("");
   const [selectedInviteNodeIds, setSelectedInviteNodeIds] = useState([]);
+  const [channelModalOpen, setChannelModalOpen] = useState(false);
+  const [channelModalName, setChannelModalName] = useState("");
+  const [channelModalType, setChannelModalType] = useState("text");
+  const [channelModalAllowedRoles, setChannelModalAllowedRoles] = useState(["admin", "suporte", "membro"]);
+  const [creatingChannel, setCreatingChannel] = useState(false);
+  const [groupMembersModalOpen, setGroupMembersModalOpen] = useState(false);
+  const [groupMembers, setGroupMembers] = useState([]);
+  const [loadingGroupMembers, setLoadingGroupMembers] = useState(false);
+  const [selectedGroupMemberNodeIds, setSelectedGroupMemberNodeIds] = useState([]);
+  const [selectedMemberRole, setSelectedMemberRole] = useState("membro");
+  const [settingGroupRole, setSettingGroupRole] = useState(false);
+  const [invitingGroupMembers, setInvitingGroupMembers] = useState(false);
 
   const activeChannelRef = useRef(activeChannelId);
 
@@ -217,7 +408,7 @@ export function Layout() {
       if (current && list.some((channel) => channel.id === current)) {
         return current;
       }
-      return list[0]?.id ?? null;
+      return null;
     });
   }, [api]);
 
@@ -300,18 +491,42 @@ export function Layout() {
     };
   }, [api, refreshChannels, refreshMessages]);
 
-  const activeChannel = useMemo(
-    () => channels.find((channel) => channel.id === activeChannelId) ?? null,
-    [activeChannelId, channels]
+  const groups = useMemo(
+    () => channels.filter((channel) => channel.channelType === "group" && !channel.parentGroupId),
+    [channels]
   );
 
+  const selectedGroup = useMemo(
+    () => groups.find((group) => group.id === selectedGroupId) ?? null,
+    [groups, selectedGroupId]
+  );
+
+  const groupChannels = useMemo(
+    () => channels.filter((channel) =>
+      channel.parentGroupId === selectedGroupId
+      && (channel.channelType === "text" || channel.channelType === "voice_video")
+    ),
+    [channels, selectedGroupId]
+  );
+
+  const activeChannel = useMemo(() => {
+    const current = channels.find((channel) => channel.id === activeChannelId) ?? null;
+    if (!current) return null;
+    if (!selectedGroupId) {
+      return current.channelType === "direct" ? current : null;
+    }
+    const isGroupChild = current.parentGroupId === selectedGroupId
+      && (current.channelType === "text" || current.channelType === "voice_video");
+    return isGroupChild ? current : null;
+  }, [activeChannelId, channels, selectedGroupId]);
+
   const groupIcons = useMemo(
-    () => channels.slice(0, 8).map((channel) => ({
-      id: channel.id,
-      label: channel.name,
-      short: channel.name.slice(0, 2).toUpperCase(),
+    () => groups.slice(0, 8).map((group) => ({
+      id: group.id,
+      label: group.name,
+      short: group.name.slice(0, 2).toUpperCase(),
     })),
-    [channels]
+    [groups]
   );
 
   const friends = useMemo(
@@ -323,6 +538,13 @@ export function Layout() {
     })),
     [contacts]
   );
+
+  useEffect(() => {
+    if (!selectedGroupId) return;
+    if (groups.some((group) => group.id === selectedGroupId)) return;
+    setSelectedGroupId(null);
+    setActiveChannelId(null);
+  }, [groups, selectedGroupId]);
 
   const onCreateIdentity = async (event) => {
     event.preventDefault();
@@ -360,32 +582,127 @@ export function Layout() {
     setGroupModalOpen(true);
   };
 
-  const onCreateSubchannel = async (channelType) => {
-    if (!api || !activeChannel) return;
-    if (activeChannel.channelType === "direct") {
-      setStatusMessage("Chat direto nao permite subcanais.");
+  const onOpenCreateChannelModal = () => {
+    if (!selectedGroup) {
+      setStatusMessage("Selecione um grupo para criar canal.");
       return;
     }
+    setChannelModalName("");
+    setChannelModalType("text");
+    setChannelModalAllowedRoles(["admin", "suporte", "membro"]);
+    setChannelModalOpen(true);
+  };
 
-    const parentGroupId = activeChannel.parentGroupId ?? activeChannel.id;
-    const suggested = channelType === "voice_video" ? "Sala de voz" : "novo-canal";
-    const name = window.prompt(
-      channelType === "voice_video"
-        ? "Nome do canal de voz/video:"
-        : "Nome do canal de texto:",
-      suggested
-    );
-    if (!name || !name.trim()) return;
+  const onCancelCreateChannelModal = () => {
+    setChannelModalOpen(false);
+    setChannelModalName("");
+    setChannelModalType("text");
+    setChannelModalAllowedRoles(["admin", "suporte", "membro"]);
+  };
 
+  const onToggleChannelAllowedRole = (role) => {
+    setChannelModalAllowedRoles((current) => (
+      current.includes(role)
+        ? current.filter((item) => item !== role)
+        : [...current, role]
+    ));
+  };
+
+  const onConfirmCreateChannel = async () => {
+    const name = channelModalName.trim();
+    if (!name || !api || !selectedGroup) return;
+
+    setCreatingChannel(true);
     try {
-      const created = await api.createChannel(name.trim(), "", { channelType, parentGroupId });
+      const created = await api.createChannel(name, "", {
+        channelType: channelModalType,
+        parentGroupId: selectedGroup.id,
+        allowedRoles: channelModalAllowedRoles,
+      });
       await refreshChannels();
-      setActiveChannelId(created.id);
       setActivePage("chats");
-      setStatusMessage(`Canal ${channelType === "voice_video" ? "voz/video" : "texto"} criado.`);
+      setActiveChannelId(created.id);
+      setStatusMessage(`Canal ${channelModalType === "voice_video" ? "voz/video" : "texto"} criado.`);
+      onCancelCreateChannelModal();
     } catch (error) {
-      console.error("[renderer] create subchannel failed", error);
-      setStatusMessage("Falha ao criar subcanal.");
+      console.error("[renderer] create channel failed", error);
+      setStatusMessage("Falha ao criar canal.");
+    } finally {
+      setCreatingChannel(false);
+    }
+  };
+
+  const onOpenGroupMembersModal = async () => {
+    if (!api || !selectedGroup) {
+      setStatusMessage("Selecione um grupo para convidar membros.");
+      return;
+    }
+    setGroupMembersModalOpen(true);
+    setLoadingGroupMembers(true);
+    setSelectedGroupMemberNodeIds([]);
+    setSelectedMemberRole("membro");
+    try {
+      const members = await api.listGroupMembers(selectedGroup.id);
+      setGroupMembers(members);
+    } catch (error) {
+      console.error("[renderer] load group members failed", error);
+      setStatusMessage("Falha ao carregar membros do grupo.");
+      setGroupMembers([]);
+    } finally {
+      setLoadingGroupMembers(false);
+    }
+  };
+
+  const onCancelGroupMembersModal = () => {
+    setGroupMembersModalOpen(false);
+    setSelectedGroupMemberNodeIds([]);
+  };
+
+  const onToggleGroupMemberNode = (nodeId) => {
+    if (!nodeId) return;
+    setSelectedGroupMemberNodeIds((current) => (
+      current.includes(nodeId)
+        ? current.filter((item) => item !== nodeId)
+        : [...current, nodeId]
+    ));
+  };
+
+  const onInviteSelectedGroupMembers = async () => {
+    if (!api || !selectedGroup || selectedGroupMemberNodeIds.length === 0) return;
+
+    setInvitingGroupMembers(true);
+    try {
+      for (const nodeId of selectedGroupMemberNodeIds) {
+        await api.invitePeerToChannel(selectedGroup.id, nodeId);
+      }
+      setStatusMessage("Convites enviados para os nodeIds selecionados.");
+      onCancelGroupMembersModal();
+    } catch (error) {
+      console.error("[renderer] invite members failed", error);
+      setStatusMessage("Falha ao enviar convites.");
+    } finally {
+      setInvitingGroupMembers(false);
+    }
+  };
+
+  const onApplyRoleToSelectedMembers = async () => {
+    if (!api || !selectedGroup || selectedGroupMemberNodeIds.length === 0) return;
+    setSettingGroupRole(true);
+    try {
+      const selectedMembers = groupMembers.filter((member) => (
+        member.nodeId && selectedGroupMemberNodeIds.includes(member.nodeId)
+      ));
+      for (const member of selectedMembers) {
+        await api.setGroupMemberRole(selectedGroup.id, member.publicKey, selectedMemberRole);
+      }
+      const refreshed = await api.listGroupMembers(selectedGroup.id);
+      setGroupMembers(refreshed);
+      setStatusMessage(`Papel ${selectedMemberRole} aplicado aos selecionados.`);
+    } catch (error) {
+      console.error("[renderer] set role failed", error);
+      setStatusMessage("Falha ao aplicar papel.");
+    } finally {
+      setSettingGroupRole(false);
     }
   };
 
@@ -415,7 +732,8 @@ export function Layout() {
         return [...current, createdChannel];
       });
       setActivePage("chats");
-      setActiveChannelId(createdChannel.id);
+      setSelectedGroupId(createdChannel.id);
+      setActiveChannelId(null);
       setStatusMessage(`Grupo \"${createdChannel.name}\" criado.`);
       for (const nodeId of selectedInviteNodeIds) {
         await api.invitePeerToChannel(createdChannel.id, nodeId);
@@ -516,6 +834,7 @@ export function Layout() {
     try {
       const channel = await api.startDirectChat(nodeId);
       setActivePage("chats");
+      setSelectedGroupId(null);
       setActiveChannelId(channel.id);
       await refreshChannels();
       setStatusMessage(`Chat direto iniciado com ${nodeId}.`);
@@ -547,9 +866,18 @@ export function Layout() {
     });
   };
 
-  const onSelectGroupIcon = (channelId) => {
+  const onSelectGroupIcon = (groupId) => {
     setActivePage("chats");
-    setActiveChannelId(channelId);
+    setSelectedGroupId(groupId);
+    setActiveChannelId(null);
+  };
+
+  const onNavigatePage = (page) => {
+    setActivePage(page);
+    if (page === "chats") {
+      setSelectedGroupId(null);
+      setActiveChannelId(null);
+    }
   };
 
   if (!bootstrapped) {
@@ -627,9 +955,10 @@ export function Layout() {
       <div className="workspace">
         <LeftSidebar
           activePage={activePage}
-          onNavigate={setActivePage}
+          onNavigate={onNavigatePage}
           groups={groupIcons}
           onSelectGroup={onSelectGroupIcon}
+          selectedGroupId={selectedGroupId}
         />
 
         <section className="main-layout">
@@ -637,10 +966,16 @@ export function Layout() {
             activePage={activePage}
             friends={friends}
             channels={channels}
+            groups={groups}
+            selectedGroup={selectedGroup}
+            groupChannels={groupChannels}
             activeChannelId={activeChannelId}
             contacts={contacts}
+            onSelectGroup={onSelectGroupIcon}
             onSelectChannel={setActiveChannelId}
             onCreateGroup={onCreateGroup}
+            onOpenCreateChannelModal={onOpenCreateChannelModal}
+            onOpenGroupMembersModal={onOpenGroupMembersModal}
             creatingGroup={creatingGroup}
             onRemoveKnownNodeId={onRemoveKnownNodeId}
             onStartDirectChat={onStartDirectChat}
@@ -652,13 +987,24 @@ export function Layout() {
             friends={friends}
             updateLog={[]}
             channels={channels}
+            groups={groups}
+            selectedGroup={selectedGroup}
+            groupChannels={groupChannels}
             activeChannel={activeChannel}
             messages={messages}
             composerText={composerText}
             onComposerTextChange={setComposerText}
             onSendMessage={onSendMessage}
             onCreateGroup={onCreateGroup}
-            onCreateSubchannel={onCreateSubchannel}
+            onOpenCreateChannelModal={onOpenCreateChannelModal}
+            onOpenGroupMembersModal={onOpenGroupMembersModal}
+            onSelectGroup={onSelectGroupIcon}
+            onOpenDirectChat={(channelId) => {
+              setSelectedGroupId(null);
+              setActivePage("chats");
+              setActiveChannelId(channelId);
+            }}
+            onOpenFriendChat={onStartDirectChat}
             creatingGroup={creatingGroup}
             p2pStatus={p2pStatus}
             remoteNodeId={remoteNodeId}
@@ -696,9 +1042,37 @@ export function Layout() {
         onConfirm={onConfirmCreateGroup}
         onCancel={onCancelCreateGroup}
         creating={creatingGroup}
-        contacts={contacts.filter((contact) => contact.connected)}
+        contacts={contacts}
         selectedNodeIds={selectedInviteNodeIds}
         onToggleNodeId={onToggleInviteNode}
+      />
+      <CreateChannelModal
+        open={channelModalOpen}
+        channelName={channelModalName}
+        channelType={channelModalType}
+        allowedRoles={channelModalAllowedRoles}
+        onChannelNameChange={setChannelModalName}
+        onChannelTypeChange={setChannelModalType}
+        onToggleRole={onToggleChannelAllowedRole}
+        onConfirm={onConfirmCreateChannel}
+        onCancel={onCancelCreateChannelModal}
+        creating={creatingChannel}
+        groupName={selectedGroup?.name ?? "Sem grupo"}
+      />
+      <GroupMembersModal
+        open={groupMembersModalOpen}
+        groupName={selectedGroup?.name ?? "Sem grupo"}
+        members={groupMembers}
+        loading={loadingGroupMembers}
+        selectedNodeIds={selectedGroupMemberNodeIds}
+        onToggleNodeId={onToggleGroupMemberNode}
+        selectedRole={selectedMemberRole}
+        onSelectedRoleChange={setSelectedMemberRole}
+        onApplyRole={onApplyRoleToSelectedMembers}
+        settingRole={settingGroupRole}
+        onConfirm={onInviteSelectedGroupMembers}
+        onCancel={onCancelGroupMembersModal}
+        inviting={invitingGroupMembers}
       />
       {invites.length > 0 ? (
         <div className="invite-toast-stack">

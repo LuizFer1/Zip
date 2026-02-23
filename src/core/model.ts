@@ -22,6 +22,7 @@ export interface Identity {
   privateKey?: string;
   username: string;
   avatar: string | null;
+  nodeId?: string;
   createdAt: number;
 }
 
@@ -198,6 +199,15 @@ export interface UIInvite {
   createdAt: number;
 }
 
+export interface UIGroupMember {
+  publicKey: string;
+  username: string;
+  avatar?: string;
+  nodeId?: string;
+  connected: boolean;
+  roles?: string[];
+}
+
 export interface UIEventUpdate {
   id: string;
   channelId: string;
@@ -232,7 +242,11 @@ export interface ZipAPI {
   createChannel(
     name: string,
     description?: string,
-    options?: { channelType?: 'group' | 'text' | 'voice_video'; parentGroupId?: string },
+    options?: {
+      channelType?: 'group' | 'text' | 'voice_video';
+      parentGroupId?: string;
+      allowedRoles?: Array<'admin' | 'suporte' | 'membro'>;
+    },
   ): Promise<UIChannel>;
   listMessages(channelId: string): Promise<UIMessage[]>;
   sendMessage(channelId: string, content: string): Promise<void>;
@@ -242,6 +256,12 @@ export interface ZipAPI {
   listContacts(): Promise<UIContact[]>;
   startDirectChat(nodeId: string): Promise<UIChannel>;
   invitePeerToChannel(channelId: string, nodeId: string): Promise<void>;
+  listGroupMembers(groupId: string): Promise<UIGroupMember[]>;
+  setGroupMemberRole(
+    groupId: string,
+    memberPublicKey: string,
+    role: 'admin' | 'suporte' | 'membro',
+  ): Promise<void>;
   listInvites(): Promise<UIInvite[]>;
   respondInvite(inviteId: string, accept: boolean): Promise<void>;
   onEventsChanged(listener: (update: UIEventUpdate) => void): () => void;

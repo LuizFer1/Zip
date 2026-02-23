@@ -33,7 +33,10 @@ model Identity {
   publicKey String @id
   username  String?
   avatar    String?
+  nodeId    String?
   updatedAt Int
+
+  @@index([nodeId])
 }
 
 model LocalIdentity {

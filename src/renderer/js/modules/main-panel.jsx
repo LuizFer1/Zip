@@ -4,7 +4,7 @@ function avatarFrom(name) {
   return name ? name.slice(0, 2).toUpperCase() : "?";
 }
 
-function HomeView({ friends, updateLog, onCreateGroup, creatingGroup }) {
+function HomeView({ friends, updateLog, onCreateGroup, creatingGroup, onOpenFriendChat }) {
   return (
     <>
       <div className="main-panel__header">
@@ -31,6 +31,9 @@ function HomeView({ friends, updateLog, onCreateGroup, creatingGroup }) {
                     <small>{friend.handle}</small>
                   </div>
                   <span className={`status-pill status-pill--${friend.status}`}>{friend.status}</span>
+                  <button type="button" className="main-panel__action" onClick={() => onOpenFriendChat(friend.id)}>
+                    Chat
+                  </button>
                 </div>
               ))}
             </div>
@@ -122,20 +125,77 @@ function ConnectionView({ identity, p2pStatus, remoteNodeId, onRemoteNodeIdChang
 
 function ChatsView({
   channels,
+  groups,
+  selectedGroup,
+  groupChannels,
   activeChannel,
   messages,
   composerText,
   onComposerTextChange,
   onSendMessage,
   onCreateGroup,
-  onCreateSubchannel,
+  onOpenCreateChannelModal,
+  onOpenGroupMembersModal,
+  onSelectGroup,
+  onOpenDirectChat,
 }) {
-  if (channels.length === 0 || !activeChannel) {
+  const directChats = channels.filter((channel) => channel.channelType === "direct");
+
+  if (!selectedGroup && (!activeChannel || activeChannel.channelType !== "direct")) {
+    return (
+      <div className="main-panel__body">
+        <div className="main-panel__grid">
+          <article className="panel--block">
+            <h3>Grupos</h3>
+            <div className="panel--block__body">
+              {groups.length === 0 ? <p className="main-panel__placeholder">Nenhum grupo criado.</p> : null}
+              {groups.map((group) => (
+                <div key={group.id} className="friend-item">
+                  <div className="avatar-chip">{avatarFrom(group.name)}</div>
+                  <div className="friend-item__info">
+                    <strong>{group.name}</strong>
+                    <small>{group.memberCount} membros</small>
+                  </div>
+                  <button type="button" className="main-panel__action" onClick={() => onSelectGroup(group.id)}>
+                    Abrir
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={onCreateGroup}>Criar grupo</button>
+            </div>
+          </article>
+          <article className="panel--block">
+            <h3>Chats diretos</h3>
+            <div className="panel--block__body">
+              {directChats.length === 0 ? <p className="main-panel__placeholder">Nenhum chat direto.</p> : null}
+              {directChats.map((chat) => (
+                <div key={chat.id} className="friend-item">
+                  <div className="avatar-chip">{avatarFrom(chat.name)}</div>
+                  <div className="friend-item__info">
+                    <strong>{chat.name}</strong>
+                    <small>Chat privado</small>
+                  </div>
+                  <button type="button" className="main-panel__action" onClick={() => onOpenDirectChat(chat.id)}>
+                    Abrir
+                  </button>
+                </div>
+              ))}
+            </div>
+          </article>
+        </div>
+      </div>
+    );
+  }
+
+  if (selectedGroup && !activeChannel) {
     return (
       <div className="main-panel__empty">
-        <div className="main-panel__empty-icon">C</div>
-        <p>Nenhum grupo disponivel. Crie um grupo para iniciar conversas.</p>
-        <button type="button" onClick={onCreateGroup}>Criar grupo</button>
+        <div className="main-panel__empty-icon">#</div>
+        <p>Grupo <strong>{selectedGroup.name}</strong> selecionado. Escolha um canal na left-mainbar ou crie um novo.</p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" onClick={onOpenCreateChannelModal}>Adicionar canal</button>
+          <button type="button" onClick={onOpenGroupMembersModal}>Convidar membros</button>
+        </div>
       </div>
     );
   }
@@ -149,11 +209,11 @@ function ChatsView({
         </div>
         {activeChannel.channelType !== "direct" ? (
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="main-panel__action" onClick={() => onCreateSubchannel("text")}>
-              Canal texto
+            <button type="button" className="main-panel__action" onClick={onOpenCreateChannelModal}>
+              Adicionar canal
             </button>
-            <button type="button" className="main-panel__action" onClick={() => onCreateSubchannel("voice_video")}>
-              Canal voz/video
+            <button type="button" className="main-panel__action" onClick={onOpenGroupMembersModal}>
+              Convidar membros
             </button>
           </div>
         ) : null}
@@ -194,13 +254,20 @@ export function MainPanel({
   friends,
   updateLog,
   channels,
+  groups,
+  selectedGroup,
+  groupChannels,
   activeChannel,
   messages,
   composerText,
   onComposerTextChange,
   onSendMessage,
   onCreateGroup,
-  onCreateSubchannel,
+  onOpenCreateChannelModal,
+  onOpenGroupMembersModal,
+  onSelectGroup,
+  onOpenDirectChat,
+  onOpenFriendChat,
   creatingGroup,
   p2pStatus,
   remoteNodeId,
@@ -217,6 +284,7 @@ export function MainPanel({
           updateLog={updateLog}
           onCreateGroup={onCreateGroup}
           creatingGroup={creatingGroup}
+          onOpenFriendChat={onOpenFriendChat}
         />
       )}
 
@@ -235,13 +303,19 @@ export function MainPanel({
       {activePage === "chats" && (
         <ChatsView
           channels={channels}
+          groups={groups}
+          selectedGroup={selectedGroup}
+          groupChannels={groupChannels}
           activeChannel={activeChannel}
           messages={messages}
           composerText={composerText}
           onComposerTextChange={onComposerTextChange}
           onSendMessage={onSendMessage}
           onCreateGroup={onCreateGroup}
-          onCreateSubchannel={onCreateSubchannel}
+          onOpenCreateChannelModal={onOpenCreateChannelModal}
+          onOpenGroupMembersModal={onOpenGroupMembersModal}
+          onSelectGroup={onSelectGroup}
+          onOpenDirectChat={onOpenDirectChat}
         />
       )}
     </main>

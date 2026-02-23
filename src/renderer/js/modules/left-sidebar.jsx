@@ -6,7 +6,7 @@ const NAV_ITEMS = [
   { id: "chats",      label: "Chats",   icon: "💬" },
 ];
 
-export function LeftSidebar({ activePage, onNavigate, groups, onSelectGroup }) {
+export function LeftSidebar({ activePage, onNavigate, groups, onSelectGroup, selectedGroupId }) {
   return (
     <aside className="left-sidebar">
       <nav className="left-sidebar__quick">
@@ -32,7 +32,7 @@ export function LeftSidebar({ activePage, onNavigate, groups, onSelectGroup }) {
             <button
               key={group.id}
               type="button"
-              className="left-sidebar__group-icon"
+              className={`left-sidebar__group-icon${group.id === selectedGroupId ? " is-active" : ""}`}
               onClick={() => onSelectGroup(group.id)}
               title={group.label}
             >

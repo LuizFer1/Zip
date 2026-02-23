@@ -26,6 +26,7 @@ import { PrismaIdentityRepository } from '../infrastructure/persistence/prisma/p
 import type {
   Event,
   UIContact,
+  UIGroupMember,
   UIInvite,
   UIP2PStatus,
   UIEventUpdate,
@@ -64,20 +65,24 @@ const BACKUP_DIR = process.env.ZIP_BACKUP_DIR;
 const BACKUP_HTTP_ENDPOINT = process.env.ZIP_BACKUP_HTTP_ENDPOINT?.trim();
 const BACKUP_HTTP_TOKEN = process.env.ZIP_BACKUP_HTTP_TOKEN?.trim();
 const DIRECT_CHANNEL_PREFIX = 'dm-';
+const CHAT_ROLES = ['admin', 'suporte', 'membro'] as const;
 
 type UIChannelType = 'group' | 'text' | 'voice_video' | 'direct';
+type ChatRole = typeof CHAT_ROLES[number];
 
 interface ChannelCreateMeta {
   name: string;
   description: string;
   channelType: UIChannelType;
   parentGroupId?: string;
+  allowedRoles?: ChatRole[];
   participantsNodeIds?: [string, string];
 }
 
 interface ChannelCreateRequestOptions {
   channelType?: 'group' | 'text' | 'voice_video';
   parentGroupId?: string;
+  allowedRoles?: ChatRole[];
 }
 
 interface DirectChannelOpenPayload {
@@ -350,6 +355,11 @@ function parseChannelCreateMeta(payload: Uint8Array, channelId: string): Channel
   const parentGroupId = typeof decoded.parentGroupId === 'string' && decoded.parentGroupId.trim()
     ? decoded.parentGroupId.trim()
     : undefined;
+  const allowedRoles = Array.isArray(decoded.allowedRoles)
+    ? decoded.allowedRoles.filter((role): role is ChatRole => (
+      typeof role === 'string' && (CHAT_ROLES as readonly string[]).includes(role)
+    ))
+    : undefined;
 
   let participantsNodeIds: [string, string] | undefined;
   if (Array.isArray(decoded.participantsNodeIds) && decoded.participantsNodeIds.length === 2) {
@@ -369,6 +379,7 @@ function parseChannelCreateMeta(payload: Uint8Array, channelId: string): Channel
     description,
     channelType,
     parentGroupId,
+    allowedRoles,
     participantsNodeIds,
   };
 }
@@ -410,16 +421,135 @@ async function canAccessChannel(channelId: string, localPublicKey: string, local
       : [];
     return participants.includes(localNodeId);
   }
+  const groupId = metaData.meta.parentGroupId ?? channelId;
+  const rolesByMember = await resolveGroupRoles(groupId);
+  const myRoles = rolesByMember.get(localPublicKey);
+  if (!myRoles || myRoles.size === 0) {
+    return false;
+  }
 
-  const membershipEvents = await eventService.listByChannel(channelId, { types: ['member.join'] });
-  return membershipEvents.some((event) => {
+  const allowedRoles = metaData.meta.allowedRoles ?? [];
+  if (
+    (metaData.meta.channelType === 'text' || metaData.meta.channelType === 'voice_video')
+    && allowedRoles.length > 0
+  ) {
+    return allowedRoles.some((role) => myRoles.has(role));
+  }
+
+  return true;
+}
+
+async function resolveChannelMemberPublicKeys(channelId: string): Promise<Set<string>> {
+  const membershipEvents = await eventService.listByChannel(channelId, {
+    types: ['member.join', 'member.leave'],
+  });
+
+  const members = new Set<string>();
+  for (const event of membershipEvents) {
     try {
       const payload = EventSerializer.decodePayload<{ member?: string }>(event.payload);
-      return normalizePublicKey(payload.member) === localPublicKey;
+      const member = typeof payload.member === 'string' ? normalizePublicKey(payload.member) : '';
+      if (!member) {
+        continue;
+      }
+      if (event.type === 'member.join') {
+        members.add(member);
+      } else if (event.type === 'member.leave') {
+        members.delete(member);
+      }
     } catch {
-      return false;
+      // Ignore malformed payload and continue deriving state.
     }
+  }
+
+  return members;
+}
+
+async function resolveGroupMembers(groupId: string): Promise<UIGroupMember[]> {
+  const members = await resolveChannelMemberPublicKeys(groupId);
+  const localIdentity = await identityService.loadLocalIdentity();
+  if (localIdentity) {
+    members.add(normalizePublicKey(localIdentity.publicKey));
+  }
+
+  if (members.size === 0) {
+    return [];
+  }
+
+  const publicKeys = [...members.values()];
+  const remoteIdentities = await prisma.identity.findMany({
+    where: { publicKey: { in: publicKeys } },
   });
+  const rolesByMember = await resolveGroupRoles(groupId);
+  const identityByKey = new Map(remoteIdentities.map((row) => [normalizePublicKey(row.publicKey), row]));
+  const localPublicKey = localIdentity ? normalizePublicKey(localIdentity.publicKey) : '';
+
+  const result: UIGroupMember[] = publicKeys.map((publicKey) => {
+    if (localIdentity && publicKey === localPublicKey) {
+      const nodeId = transportRef?.nodeId ?? localPublicKey;
+      return {
+        publicKey,
+        username: localIdentity.username,
+        avatar: localIdentity.avatar ?? initials(localIdentity.username),
+        nodeId,
+        connected: true,
+        roles: [...(rolesByMember.get(publicKey) ?? new Set<ChatRole>())],
+      };
+    }
+
+    const remote = identityByKey.get(publicKey);
+    const nodeId = remote?.nodeId ?? undefined;
+    const connected = nodeId ? (contactsByNodeId.get(nodeId)?.connected ?? false) : false;
+    return {
+      publicKey,
+      username: remote?.username?.trim() || `${publicKey.slice(0, 8)}...`,
+      avatar: remote?.avatar ?? undefined,
+      nodeId,
+      connected,
+      roles: [...(rolesByMember.get(publicKey) ?? new Set<ChatRole>())],
+    };
+  });
+
+  return result.sort((a, b) => a.username.localeCompare(b.username));
+}
+
+async function resolveGroupRoles(groupId: string): Promise<Map<string, Set<ChatRole>>> {
+  const members = await resolveChannelMemberPublicKeys(groupId);
+  const rolesByMember = new Map<string, Set<ChatRole>>();
+
+  for (const member of members) {
+    rolesByMember.set(member, new Set<ChatRole>(['membro']));
+  }
+
+  const roleEvents = await eventService.listByChannel(groupId, {
+    types: ['role.grant', 'role.revoke'],
+  });
+
+  for (const event of roleEvents) {
+    try {
+      const payload = EventSerializer.decodePayload<{ member?: string; role?: string }>(event.payload);
+      const member = typeof payload.member === 'string' ? normalizePublicKey(payload.member) : '';
+      const role = typeof payload.role === 'string' ? payload.role : '';
+      if (!member || !(CHAT_ROLES as readonly string[]).includes(role)) {
+        continue;
+      }
+      const roleKey = role as ChatRole;
+      const set = rolesByMember.get(member) ?? new Set<ChatRole>(['membro']);
+      if (event.type === 'role.grant') {
+        set.add(roleKey);
+      } else {
+        set.delete(roleKey);
+      }
+      if (set.size === 0) {
+        set.add('membro');
+      }
+      rolesByMember.set(member, set);
+    } catch {
+      // Ignore malformed payload and continue deriving roles.
+    }
+  }
+
+  return rolesByMember;
 }
 
 function parsePort(rawPort: string | undefined, fallback: number): number {
@@ -570,6 +700,7 @@ async function upsertRemoteIdentityFromShare(payload: {
     publicKey: normalizePublicKey(payload.publicKey),
     username: payload.username,
     avatar: payload.avatar ?? null,
+    nodeId: payload.nodeId,
     createdAt: Date.now(),
   });
 
@@ -916,34 +1047,12 @@ ipcMain.handle('channel:list', async (): Promise<UIChannel[]> => {
     }
 
     const events = await eventService.listByChannel(channelId, {
-      types: ['member.join', 'member.leave', 'message.create'],
+      types: ['message.create'],
     });
-
-    const members = new Set<string>();
+    const memberSourceChannelId = metaData.meta.parentGroupId ?? channelId;
+    const members = await resolveChannelMemberPublicKeys(memberSourceChannelId);
     let lastMessage: string | undefined;
     for (const event of events) {
-      if (event.type === 'member.join') {
-        try {
-          const payload = EventSerializer.decodePayload<{ member?: string }>(event.payload);
-          if (payload.member) {
-            members.add(normalizePublicKey(payload.member));
-          }
-        } catch {
-          // Ignore malformed payload and keep listing.
-        }
-        continue;
-      }
-      if (event.type === 'member.leave') {
-        try {
-          const payload = EventSerializer.decodePayload<{ member?: string }>(event.payload);
-          if (payload.member) {
-            members.delete(normalizePublicKey(payload.member));
-          }
-        } catch {
-          // Ignore malformed payload and keep listing.
-        }
-        continue;
-      }
       if (event.type === 'message.create') {
         try {
           const payload = EventSerializer.decodePayload<{ content: string }>(event.payload);
@@ -998,6 +1107,9 @@ ipcMain.handle(
   if (parentGroupId) {
     metaPayload.parentGroupId = parentGroupId;
   }
+  if (options?.allowedRoles && options.allowedRoles.length > 0) {
+    metaPayload.allowedRoles = options.allowedRoles;
+  }
 
   const createdAt = Date.now();
   await channelRepository.createIfMissing({
@@ -1025,6 +1137,18 @@ ipcMain.handle(
   });
   emitUIEventUpdate(memberJoined, 'local');
   gossipService?.broadcastEvent(memberJoined);
+
+  if (channelType === 'group') {
+    const roleGranted = await eventService.publish({
+      channelId,
+      author: publicKeyHex,
+      type: 'role.grant',
+      payload: { member: publicKeyHex, role: 'admin' },
+      privateKey,
+    });
+    emitUIEventUpdate(roleGranted, 'local');
+    gossipService?.broadcastEvent(roleGranted);
+  }
 
   return {
     id: channelId,
@@ -1168,13 +1292,12 @@ ipcMain.handle('contacts:list', async (): Promise<UIContact[]> => {
 ipcMain.handle('contacts:start-direct-chat', async (_event, nodeId: string): Promise<UIChannel> => {
   const identity = await identityService.loadLocalIdentity();
   if (!identity) throw new Error('No identity');
-  if (!transportRef) throw new Error('P2P not connected');
 
   const contact = contactsByNodeId.get(nodeId);
   if (!contact) throw new Error('Unknown contact');
 
   const localKey = normalizePublicKey(identity.publicKey);
-  const localNodeId = transportRef.nodeId;
+  const localNodeId = transportRef?.nodeId ?? localKey;
   const channelId = buildDirectChannelId(localNodeId, nodeId);
   const channelName = contact.username;
   const participantsNodeIds = [localNodeId, nodeId].sort() as [string, string];
@@ -1221,7 +1344,7 @@ ipcMain.handle('contacts:start-direct-chat', async (_event, nodeId: string): Pro
     }
   }
 
-  if (nodeId) {
+  if (transportRef && nodeId) {
     const bootstrapEvents = await eventService.listByChannel(channelId);
     const serializedEvents = bootstrapEvents.map((event) => EventSerializer.serialize(event));
     transportRef.sendToNode(nodeId, 'direct-chat.open', {
@@ -1263,6 +1386,80 @@ ipcMain.handle('channel:invite', async (_event, channelId: string, nodeId: strin
     fromUsername: identity.username,
   });
 });
+
+ipcMain.handle('group:members', async (_event, groupId: string): Promise<UIGroupMember[]> => {
+  const normalizedGroupId = String(groupId ?? '').trim();
+  if (!normalizedGroupId) {
+    return [];
+  }
+  const channelMeta = await loadChannelMeta(normalizedGroupId);
+  if (!channelMeta || channelMeta.meta.channelType !== 'group') {
+    return [];
+  }
+  return resolveGroupMembers(normalizedGroupId);
+});
+
+ipcMain.handle(
+  'group:set-role',
+  async (_event, groupId: string, memberPublicKey: string, role: ChatRole): Promise<void> => {
+    const normalizedGroupId = String(groupId ?? '').trim();
+    const normalizedMember = normalizePublicKey(memberPublicKey);
+    if (!normalizedGroupId || !normalizedMember) {
+      throw new Error('Invalid group/member');
+    }
+    if (!(CHAT_ROLES as readonly string[]).includes(role)) {
+      throw new Error('Invalid role');
+    }
+
+    const localIdentity = await identityService.loadLocalIdentity();
+    if (!localIdentity) {
+      throw new Error('No identity');
+    }
+    const localKey = normalizePublicKey(localIdentity.publicKey);
+    const rolesByMember = await resolveGroupRoles(normalizedGroupId);
+    const localRoles = rolesByMember.get(localKey);
+    if (!localRoles || !localRoles.has('admin')) {
+      throw new Error('Only admins can manage roles');
+    }
+
+    const privateKey = await identityService.getLocalPrivateKey();
+    const existing = rolesByMember.get(normalizedMember) ?? new Set<ChatRole>(['membro']);
+    for (const existingRole of existing) {
+      if (existingRole === role) continue;
+      try {
+        const revoked = await eventService.publish({
+          channelId: normalizedGroupId,
+          author: localKey,
+          type: 'role.revoke',
+          payload: { member: normalizedMember, role: existingRole },
+          privateKey,
+        });
+        emitUIEventUpdate(revoked, 'local');
+        gossipService?.broadcastEvent(revoked);
+      } catch (error) {
+        if (!(error instanceof DuplicateEventError)) {
+          throw error;
+        }
+      }
+    }
+
+    try {
+      const granted = await eventService.publish({
+        channelId: normalizedGroupId,
+        author: localKey,
+        type: 'role.grant',
+        payload: { member: normalizedMember, role },
+        privateKey,
+      });
+      emitUIEventUpdate(granted, 'local');
+      gossipService?.broadcastEvent(granted);
+    } catch (error) {
+      if (!(error instanceof DuplicateEventError)) {
+        throw error;
+      }
+    }
+  },
+);
 
 ipcMain.handle('invite:list', async (): Promise<UIInvite[]> => {
   return listInvites();

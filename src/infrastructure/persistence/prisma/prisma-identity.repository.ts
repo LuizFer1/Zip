@@ -57,12 +57,14 @@ export class PrismaIdentityRepository implements IdentityRepository {
       update: {
         username: identity.username,
         avatar: identity.avatar ?? null,
+        nodeId: identity.nodeId ?? null,
         updatedAt: Date.now(),
       },
       create: {
         publicKey: identity.publicKey,
         username: identity.username,
         avatar: identity.avatar ?? null,
+        nodeId: identity.nodeId ?? null,
         updatedAt: Date.now(),
       },
     });
