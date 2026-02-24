@@ -1,0 +1,205 @@
+﻿// prisma/schema.prisma
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+/**
+ * EVENT LOG (source of truth)
+ */
+model Event {
+  id            String @id // hash determinístico do conteúdo canônico
+  channelId     String // stream: canal (group text/voice) ou DM
+  author        String // publicKey
+  timestamp     Int    // unix seconds (ou ms, mas padronize)
+  type          String // EventType (TS)
+  payload       Bytes  // payload canônico serializado (ex: msgpack/cbor/json-canônico)
+  prev          Json   // refs DAG (array de eventIds)
+  signature     String // ed25519(signature over id)
+  receivedAt    Int?   // quando eu recebi (local)
+
+  @@index([channelId])
+  @@index([timestamp])
+  @@index([author])
+  @@index([channelId, timestamp])
+}
+
+/**
+ * IDENTIDADES
+ */
+model Identity {
+  publicKey String @id
+  username  String?
+  avatar    String?
+  nodeId    String?
+  updatedAt Int
+
+  @@index([nodeId])
+}
+
+model LocalIdentity {
+  id         Int    @id @default(1)
+  publicKey  String
+  privateKey String // armazenar criptografado (AES-GCM) no app
+  avatar     String?
+  username   String
+  createdAt  Int
+}
+
+/**
+ * PEERS / REDE
+ */
+model Peer {
+  publicKey String @id
+  lastSeen  Int
+  state     String @default("known") // known|connected|blocked
+  nickname  String?
+  addresses String // manter por enquanto (ou normalizar depois)
+
+  @@index([lastSeen])
+  @@index([state])
+}
+
+model SyncCursor {
+  peerPublicKey String
+  channelId     String
+  lastHeads     Json // array de eventIds que eu sei que o peer tem
+  updatedAt     Int
+
+  @@id([peerPublicKey, channelId])
+  @@index([channelId])
+}
+
+/**
+ * GRUPOS (materialized view / state)
+ * Reconstruído a partir de eventos: group.create/update/delete
+ */
+model GroupState {
+  id        String @id // groupId
+  creator   String
+  name      String
+  avatar    String?
+  createdAt Int
+  updatedAt Int
+  deletedAt Int?
+
+  @@index([creator])
+}
+
+/**
+ * CANAIS (materialized view / state)
+ * Canais dentro do grupo e DMs (groupId null para DM)
+ */
+model ChannelState {
+  id        String @id // channelId (stream id)
+  groupId   String?
+  kind      String // text|voice|dm
+  name      String?
+  createdAt Int
+  updatedAt Int
+  deletedAt Int?
+
+  @@index([groupId])
+  @@index([kind])
+}
+
+/**
+ * MEMBROS (materialized view / state)
+ */
+model MemberState {
+  groupId     String
+  memberKey   String // publicKey
+  joinedAt    Int?
+  leftAt      Int?
+  mutedUntil  Int?
+  banState    String? // null|reviewable|permanent
+  banCaseId   String?
+  bannedAt    Int?
+  bannedBy    String?
+  updatedAt   Int
+
+  @@id([groupId, memberKey])
+  @@index([memberKey])
+  @@index([groupId])
+  @@index([banState])
+}
+
+/**
+ * ROLES / PERMISSIONS (materialized view / state)
+ */
+model RoleState {
+  groupId     String
+  roleId      String // owner|admin|mod|member (ou custom no futuro)
+  name        String
+  permissions Json   // array de strings (Permission)
+  updatedAt   Int
+
+  @@id([groupId, roleId])
+  @@index([groupId])
+}
+
+model RoleAssignmentState {
+  groupId   String
+  roleId    String
+  memberKey String
+  grantedBy String
+  grantedAt Int
+  revokedAt Int?
+
+  @@id([groupId, roleId, memberKey])
+  @@index([memberKey])
+  @@index([groupId, memberKey])
+}
+
+/**
+ * CASOS DE MODERAÇÃO (materialized view / state)
+ * Criado/atualizado por eventos member.ban + ban.appeal + ban.review.resolve
+ */
+model ModerationCaseState {
+  id          String @id // caseId
+  groupId     String
+  targetKey   String
+  kind        String // reviewable|permanent
+  status      String // open|appealed|upheld|revoked|escalated
+  createdAt   Int
+  createdBy   String
+  reason      String?
+  resolvedAt  Int?
+  resolvedBy  String?
+  resolution  String?
+
+  @@index([groupId])
+  @@index([targetKey])
+  @@index([status])
+}
+
+/**
+ * CHAVES DE CANAL/GRUPO (opcional para 0.1.0)
+ * Se for criptografar conteúdo, guarde aqui as chaves (sempre criptografadas em repouso).
+ */
+model ChannelKey {
+  channelId        String @id
+  publicKey        String
+  privateKey       String? // se existir (ex: para handshake)
+  encryptionKey    Bytes   // SEMPRE criptografada (blob)
+  encryptionKeyAlg String  @default("aes-256-gcm")
+  updatedAt        Int
+
+  @@index([publicKey])
+}
+
+/**
+ * HEADS por canal (para acelerar sync / leitura)
+ * Você pode manter como “cache” dos heads atuais do DAG.
+ */
+model ChannelHead {
+  channelId String
+  eventId   String
+
+  @@id([channelId, eventId])
+  @@index([channelId])
+}

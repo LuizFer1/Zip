@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+*.tmp
+*.env
+.DS_Store
+.idea/
+.env
+zip.db
