@@ -1,4 +1,6 @@
 ﻿// prisma/schema.prisma
+// Discord2.0 P2P + Event-sourcing (DAG) + Offline Sync + Attachments optimized (content-addressed blobs)
+
 datasource db {
   provider = "sqlite"
 }
@@ -9,18 +11,24 @@ generator client {
 }
 
 /**
- * EVENT LOG (source of truth)
+ * =========================
+ * EVENT LOG (SOURCE OF TRUTH)
+ * =========================
+ * - Nunca grave arquivos grandes aqui.
+ * - payload = bytes de um payload canônico (json-canônico / msgpack / cbor).
+ * - id = hash(payload_canônico + header) => determinístico.
+ * - prev = lista de eventIds para formar um DAG por channelId.
  */
 model Event {
-  id            String @id // hash determinístico do conteúdo canônico
-  channelId     String // stream: canal (group text/voice) ou DM
-  author        String // publicKey
-  timestamp     Int    // unix seconds (ou ms, mas padronize)
-  type          String // EventType (TS)
-  payload       Bytes  // payload canônico serializado (ex: msgpack/cbor/json-canônico)
-  prev          Json   // refs DAG (array de eventIds)
-  signature     String // ed25519(signature over id)
-  receivedAt    Int?   // quando eu recebi (local)
+  id         String @id
+  channelId  String
+  author     String
+  timestamp  Int
+  type       String
+  payload    Bytes
+  prev       Json
+  signature  String
+  receivedAt Int?
 
   @@index([channelId])
   @@index([timestamp])
@@ -29,7 +37,11 @@ model Event {
 }
 
 /**
+ * =========================
  * IDENTIDADES
+ * =========================
+ * Identity = pessoas/conhecidos (cache de perfis)
+ * LocalIdentity = dono da instância
  */
 model Identity {
   publicKey String @id
@@ -44,30 +56,38 @@ model Identity {
 model LocalIdentity {
   id         Int    @id @default(1)
   publicKey  String
-  privateKey String // armazenar criptografado (AES-GCM) no app
+  privateKey String // armazene criptografado (AES-GCM) no app
   avatar     String?
   username   String
   createdAt  Int
 }
 
 /**
+ * =========================
  * PEERS / REDE
+ * =========================
+ * Peer = nó conhecido/conectado/bloqueado.
+ * addresses: string por simplicidade (v0.1.0). Pode normalizar depois.
  */
 model Peer {
   publicKey String @id
   lastSeen  Int
   state     String @default("known") // known|connected|blocked
   nickname  String?
-  addresses String // manter por enquanto (ou normalizar depois)
+  addresses String
 
   @@index([lastSeen])
   @@index([state])
 }
 
+/**
+ * Cursor de sync (cache):
+ * - lastHeads: o que EU acho que o peer tem (por canal)
+ */
 model SyncCursor {
   peerPublicKey String
   channelId     String
-  lastHeads     Json // array de eventIds que eu sei que o peer tem
+  lastHeads     Json
   updatedAt     Int
 
   @@id([peerPublicKey, channelId])
@@ -75,11 +95,14 @@ model SyncCursor {
 }
 
 /**
- * GRUPOS (materialized view / state)
- * Reconstruído a partir de eventos: group.create/update/delete
+ * =========================
+ * GRUPOS / CANAIS (MATERIALIZED STATE)
+ * =========================
+ * Esses estados são DERIVADOS dos eventos e podem ser reconstruídos do Event log.
+ * Otimizam queries e UX.
  */
 model GroupState {
-  id        String @id // groupId
+  id        String @id
   creator   String
   name      String
   avatar    String?
@@ -88,16 +111,13 @@ model GroupState {
   deletedAt Int?
 
   @@index([creator])
+  @@index([deletedAt])
 }
 
-/**
- * CANAIS (materialized view / state)
- * Canais dentro do grupo e DMs (groupId null para DM)
- */
 model ChannelState {
-  id        String @id // channelId (stream id)
-  groupId   String?
-  kind      String // text|voice|dm
+  id        String @id
+  groupId   String? // null => DM
+  kind      String  // text|voice|dm
   name      String?
   createdAt Int
   updatedAt Int
@@ -105,21 +125,30 @@ model ChannelState {
 
   @@index([groupId])
   @@index([kind])
+  @@index([deletedAt])
 }
 
 /**
- * MEMBROS (materialized view / state)
+ * =========================
+ * MEMBROS / MODERAÇÃO (STATE)
+ * =========================
+ * - mutedUntil: se now < mutedUntil => bloqueia message.create
+ * - banState: reviewable|permanent
  */
 model MemberState {
   groupId     String
-  memberKey   String // publicKey
+  memberKey   String
+
   joinedAt    Int?
   leftAt      Int?
+
   mutedUntil  Int?
+
   banState    String? // null|reviewable|permanent
   banCaseId   String?
   bannedAt    Int?
   bannedBy    String?
+
   updatedAt   Int
 
   @@id([groupId, memberKey])
@@ -129,35 +158,8 @@ model MemberState {
 }
 
 /**
- * ROLES / PERMISSIONS (materialized view / state)
- */
-model RoleState {
-  groupId     String
-  roleId      String // owner|admin|mod|member (ou custom no futuro)
-  name        String
-  permissions Json   // array de strings (Permission)
-  updatedAt   Int
-
-  @@id([groupId, roleId])
-  @@index([groupId])
-}
-
-model RoleAssignmentState {
-  groupId   String
-  roleId    String
-  memberKey String
-  grantedBy String
-  grantedAt Int
-  revokedAt Int?
-
-  @@id([groupId, roleId, memberKey])
-  @@index([memberKey])
-  @@index([groupId, memberKey])
-}
-
-/**
- * CASOS DE MODERAÇÃO (materialized view / state)
- * Criado/atualizado por eventos member.ban + ban.appeal + ban.review.resolve
+ * Casos de moderação para revisão/painel futuro.
+ * Derivado dos eventos: member.ban + ban.appeal + ban.review.resolve
  */
 model ModerationCaseState {
   id          String @id // caseId
@@ -165,9 +167,11 @@ model ModerationCaseState {
   targetKey   String
   kind        String // reviewable|permanent
   status      String // open|appealed|upheld|revoked|escalated
+
   createdAt   Int
   createdBy   String
   reason      String?
+
   resolvedAt  Int?
   resolvedBy  String?
   resolution  String?
@@ -178,14 +182,48 @@ model ModerationCaseState {
 }
 
 /**
- * CHAVES DE CANAL/GRUPO (opcional para 0.1.0)
- * Se for criptografar conteúdo, guarde aqui as chaves (sempre criptografadas em repouso).
+ * =========================
+ * ROLES / PERMISSIONS (STATE)
+ * =========================
+ * - RoleState.permissions = array de strings ("member.mute", "staff.manage", etc)
+ */
+model RoleState {
+  groupId     String
+  roleId      String // owner|admin|mod|member (ou custom futuro)
+  name        String
+  permissions Json
+  updatedAt   Int
+
+  @@id([groupId, roleId])
+  @@index([groupId])
+}
+
+model RoleAssignmentState {
+  groupId   String
+  roleId    String
+  memberKey String
+
+  grantedBy String
+  grantedAt Int
+  revokedAt Int?
+
+  @@id([groupId, roleId, memberKey])
+  @@index([memberKey])
+  @@index([groupId, memberKey])
+}
+
+/**
+ * =========================
+ * CHAVES DE CANAL (OPCIONAL v0.1.0)
+ * =========================
+ * Se você criptografar o conteúdo por canal/DM:
+ * - encryptionKey é armazenada CRIPTOGRAFADA em repouso (Bytes).
  */
 model ChannelKey {
   channelId        String @id
   publicKey        String
-  privateKey       String? // se existir (ex: para handshake)
-  encryptionKey    Bytes   // SEMPRE criptografada (blob)
+  privateKey       String?
+  encryptionKey    Bytes
   encryptionKeyAlg String  @default("aes-256-gcm")
   updatedAt        Int
 
@@ -193,8 +231,11 @@ model ChannelKey {
 }
 
 /**
- * HEADS por canal (para acelerar sync / leitura)
- * Você pode manter como “cache” dos heads atuais do DAG.
+ * =========================
+ * HEADS POR CANAL (CACHE)
+ * =========================
+ * Cache das "pontas" atuais do DAG (channelId -> eventId heads)
+ * Ajuda sync e timeline incremental.
  */
 model ChannelHead {
   channelId String
@@ -202,4 +243,69 @@ model ChannelHead {
 
   @@id([channelId, eventId])
   @@index([channelId])
+}
+
+/**
+ * ==========================================================
+ * ARQUIVOS / MÍDIA (OTIMIZADO): CONTENT-ADDRESSED BLOBS
+ * ==========================================================
+ * Regra: o binário do arquivo fica no DISCO.
+ * O banco guarda:
+ * - hash do conteúdo
+ * - metadados (mime/size/nome)
+ * - estado de download
+ * - relação com eventos (BlobRef)
+ *
+ * Isso permite:
+ * - deduplicação
+ * - sync/offline parcial
+ * - download por hash
+ * - resumir downloads (BlobPiece)
+ */
+model Blob {
+  hash      String @id // sha256/blake3 do conteúdo
+  size      Int
+  mime      String
+  filename  String?
+  createdAt Int
+
+  // caminho local do arquivo (ou diretório). Pode ser null se ainda não baixou.
+  localPath String?
+
+  // missing|partial|complete
+  status    String @default("missing")
+
+  hashAlg   String @default("sha256")
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model BlobRef {
+  id        String @id @default(cuid())
+  blobHash  String
+  eventId   String
+  channelId String
+  author    String
+  createdAt Int
+
+  // attachment|avatar|group-avatar|etc
+  kind      String @default("attachment")
+
+  @@index([blobHash])
+  @@index([eventId])
+  @@index([channelId, createdAt])
+  @@index([author])
+}
+
+model BlobPiece {
+  blobHash  String
+  index     Int
+  offset    Int
+  length    Int
+  pieceHash String?
+  status    String @default("missing") // missing|have
+
+  @@id([blobHash, index])
+  @@index([blobHash, status])
 }
