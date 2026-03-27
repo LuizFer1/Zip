@@ -66,17 +66,19 @@ export type EventType =
   | "media.remove";
 
 export interface Event<TPayload = unknown> {
-  id: HashHex;
   channelId: string;
   author: PublicKeyHex;
   timestamp: UnixTime;
   type: EventType;
   payload: TPayload;
-  prev: HashHex[];
-  signature: string;
+  prev: HashHex;
   receivedAt?: UnixTime;
 }
 
+export interface EventSigned extends Event {
+  id: HashHex;
+  signature: string;
+}
 
 
 /* ==========================================================
